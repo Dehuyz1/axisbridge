@@ -6,29 +6,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
+  main label, main input, main h2, main .row-label { font-weight: 700; }
+  main .hint { font-weight: 500; color: #64748b; }
+</style>
 </head>
 <body class="bg-slate-100 text-slate-900" x-data="settings()" x-init="init()">
 
 <header class="bg-slate-800 text-slate-100 px-4 py-2 flex items-center gap-4">
-  <div class="font-semibold">axisbridge</div>
-  <nav class="flex gap-3 text-sm">
+  <div class="font-extrabold text-lg">axisbridge</div>
+  <nav class="flex gap-3 text-sm font-bold">
     <a href="/management" class="px-2 py-1 rounded hover:bg-slate-700">Management</a>
     <a href="/gifts"      class="px-2 py-1 rounded hover:bg-slate-700">Gift List</a>
     <a href="/setting"    class="px-2 py-1 rounded bg-slate-700">Setting</a>
   </nav>
-  <div class="ml-auto text-xs" x-text="saveStatus"></div>
+  <div class="ml-auto text-xs font-bold" x-text="saveStatus"></div>
 </header>
 
 <main class="max-w-4xl mx-auto p-4 grid gap-6">
   <template x-for="group in groups" :key="group.title">
     <section class="bg-white shadow-sm rounded border">
-      <h2 class="text-sm font-semibold px-3 py-2 border-b bg-slate-50" x-text="group.title"></h2>
+      <h2 class="text-sm px-3 py-2 border-b bg-slate-100" x-text="group.title"></h2>
       <div class="p-3 grid gap-3">
         <template x-for="f in group.fields" :key="f.key">
           <div class="grid grid-cols-3 gap-3 items-center">
-            <label class="text-sm font-medium" :for="f.key">
+            <label class="text-sm row-label" :for="f.key">
               <span x-text="f.label"></span>
-              <div class="text-xs text-slate-500 font-normal" x-text="f.hint"></div>
+              <div class="text-xs hint" x-text="f.hint"></div>
               <code class="text-[10px] text-slate-400" x-text="f.key"></code>
             </label>
             <template x-if="f.type === 'bool'">
@@ -39,7 +44,7 @@
                      x-model="values[f.key]" @change="save(f)"
                      class="border rounded px-2 py-1 text-sm col-span-1 w-40" />
             </template>
-            <div class="text-xs text-slate-500" x-text="statusOf(f.key)"></div>
+            <div class="text-xs" x-text="statusOf(f.key)"></div>
           </div>
         </template>
       </div>
@@ -47,8 +52,8 @@
   </template>
 
   <section class="bg-white shadow-sm rounded border">
-    <h2 class="text-sm font-semibold px-3 py-2 border-b bg-slate-50">Raw settings JSON</h2>
-    <pre class="p-3 text-xs overflow-auto" x-text="rawJson"></pre>
+    <h2 class="text-sm px-3 py-2 border-b bg-slate-100 font-bold">Raw settings JSON</h2>
+    <pre class="p-3 text-xs overflow-auto font-mono" x-text="rawJson"></pre>
   </section>
 </main>
 
@@ -62,6 +67,10 @@ function settings() {
         { key: "otp.max_attempt", label: "Max Attempt", type: "int",    hint: "Total percobaan OTP per nomor sebelum dilempar ke gift" },
         { key: "otp.retry_gap",   label: "Retry Gap",   type: "string", hint: "Jeda antar percobaan OTP (mis. 90s, 1m)" },
         { key: "otp.debounce",    label: "Debounce",    type: "string", hint: "Cooldown push nomor duplikat (mis. 10m)" },
+      ]},
+      { title: "Renew", fields: [
+        { key: "renew.enabled",    label: "Renew enabled",    type: "bool",   hint: "Aktifkan worker renew (masih di roadmap; setting hanya disimpan)" },
+        { key: "renew.minus_days", label: "Minus days",       type: "int",    hint: "Renew mulai berapa hari sebelum masa aktif habis (mis. 3 = renew jika sisa ≤ 3 hari)" },
       ]},
       { title: "Gift", fields: [
         { key: "gift.quota_daily", label: "Quota Daily", type: "int", hint: "Batas gift sukses per hari (global)" },

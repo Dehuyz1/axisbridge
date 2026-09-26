@@ -9,186 +9,299 @@
 <style>
   html, body { height: 100%; }
   body { font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
-  .row-otp-fail { background: #fee2e2; }
-  .row-gift     { background: #fef9c3; }
-  .row-avail    { background: #dcfce7; }
-  .row-paused   { background: #e5e7eb; }
-  .cell         { padding: 4px 8px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+  /* Semua teks tabel: bold. */
+  table.mgmt-table td, table.mgmt-table th { font-weight: 700; }
+  .cell { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
   .table-scroll { max-height: calc(100vh - 220px); overflow: auto; }
+  .row-dead  { background: #fee2e2; }
+  .row-alive { background: #dcfce7; }
+  .sortable { cursor: pointer; user-select: none; }
+  .sortable:hover { background: #cbd5e1; }
+  .sort-ind { font-size: 10px; margin-left: 4px; opacity: 0.7; }
+  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
+                  font-weight: 800; font-size: 12px; cursor: pointer; user-select: none; }
+  .badge-alive { background: #16a34a; color: white; }
+  .badge-dead  { background: #dc2626; color: white; }
+  dialog { border-radius: 8px; padding: 0; border: 1px solid #cbd5e1; }
+  dialog::backdrop { background: rgba(0,0,0,0.5); }
+  input, select, textarea { font-weight: 600; }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-900" x-data="mgmt()" x-init="init()">
 
 <header class="bg-slate-800 text-slate-100 px-4 py-2 flex items-center gap-4">
-  <div class="font-semibold">axisbridge</div>
-  <nav class="flex gap-3 text-sm">
+  <div class="font-extrabold text-lg">axisbridge</div>
+  <nav class="flex gap-3 text-sm font-bold">
     <a href="/management" class="px-2 py-1 rounded bg-slate-700">Management</a>
     <a href="/gifts"      class="px-2 py-1 rounded hover:bg-slate-700">Gift List</a>
     <a href="/setting"    class="px-2 py-1 rounded hover:bg-slate-700">Setting</a>
   </nav>
-  <div class="ml-auto text-xs opacity-70" x-text="'Last refresh: ' + lastRefresh"></div>
+  <div class="ml-auto text-xs opacity-80 font-bold">
+    Total: <span x-text="rows.length"></span> ·
+    Alive: <span x-text="counts.alive"></span> ·
+    Dead: <span x-text="counts.dead"></span> ·
+    Last refresh: <span x-text="lastRefresh"></span>
+  </div>
 </header>
 
 <section class="p-3 flex flex-wrap gap-2 items-center bg-white border-b">
-  <input type="search" placeholder="Search msisdn…" class="border rounded px-2 py-1 text-sm" x-model.debounce.300ms="q" @input="reload()" />
-  <select class="border rounded px-2 py-1 text-sm" x-model="status" @change="reload()">
-    <option value="">All status</option>
-    <option value="new">new</option>
-    <option value="otp_pending">otp_pending</option>
-    <option value="otp_failed">otp_failed</option>
-    <option value="available">available</option>
-    <option value="gift_wait">gift_wait</option>
-    <option value="gift_done">gift_done</option>
-    <option value="dead">dead</option>
-    <option value="paused">paused</option>
+  <input type="search" placeholder="Search nomor..." class="border rounded px-2 py-1 text-sm"
+         x-model.debounce.300ms="q" @input="reload()" />
+  <select class="border rounded px-2 py-1 text-sm" x-model="deadFilter" @change="reload()">
+    <option value="">Semua</option>
+    <option value="false">Tidak Mati</option>
+    <option value="true">Mati</option>
   </select>
-  <button class="px-2 py-1 border rounded text-sm hover:bg-slate-100" @click="reload()">Refresh</button>
+  <input placeholder="Filter paket..." class="border rounded px-2 py-1 text-sm"
+         x-model.debounce.300ms="paketFilter" />
+  <input type="date" class="border rounded px-2 py-1 text-sm" x-model="masaMinFilter" title="Masa aktif >= tanggal ini" />
+  <button class="px-2 py-1 border rounded text-sm hover:bg-slate-100 font-bold" @click="reload()">Refresh</button>
+  <a class="px-2 py-1 border rounded text-sm hover:bg-slate-100 font-bold bg-slate-50"
+     href="/api/accounts.csv">Export CSV</a>
 
   <div class="ml-4 flex gap-2 items-center text-sm" x-show="selected.length">
-    <span x-text="selected.length + ' selected'"></span>
-    <button class="px-2 py-1 bg-blue-600 text-white rounded"  @click="bulkResend()">Resend OTP</button>
-    <button class="px-2 py-1 bg-slate-600 text-white rounded" @click="bulkPause(true)">Pause</button>
-    <button class="px-2 py-1 bg-slate-600 text-white rounded" @click="bulkPause(false)">Resume</button>
-    <button class="px-2 py-1 bg-rose-600 text-white rounded"  @click="bulkDelete()">Delete</button>
+    <span class="font-bold" x-text="selected.length + ' terpilih'"></span>
+    <button class="px-2 py-1 border rounded hover:bg-slate-100 font-bold" @click="bulkResend()">Resend OTP</button>
+    <button class="px-2 py-1 border rounded hover:bg-slate-100 font-bold" @click="bulkPause()">Pause</button>
+    <button class="px-2 py-1 border rounded hover:bg-red-100 text-red-700 font-bold" @click="bulkDelete()">Delete</button>
   </div>
 
   <div class="ml-auto flex gap-2 items-center">
-    <input placeholder="Register msisdn (08.. / 62..)" class="border rounded px-2 py-1 text-sm w-64" x-model="newMsisdn" @keydown.enter="register()" />
-    <button class="px-2 py-1 bg-slate-800 text-white rounded text-sm" @click="register()">Register</button>
+    <input type="text" placeholder="0831xxxxxxxx" class="border rounded px-2 py-1 text-sm w-52"
+           x-model="newMsisdn" @keyup.enter="addOne()" />
+    <button class="px-3 py-1 bg-slate-700 text-white rounded text-sm hover:bg-slate-800 font-bold"
+            @click="addOne()">Register</button>
+    <button class="px-3 py-1 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700 font-bold"
+            @click="$refs.bulkDlg.showModal()">Upload List</button>
   </div>
 </section>
 
 <section class="table-scroll bg-white">
-  <table class="min-w-full text-xs">
+  <table class="mgmt-table min-w-full text-sm">
     <thead class="bg-slate-200 sticky top-0">
       <tr>
-        <th class="cell w-8"><input type="checkbox" @change="toggleAll($event)" :checked="allSelected()" /></th>
-        <th class="cell">ID</th>
-        <th class="cell">Nomor</th>
-        <th class="cell">Status</th>
-        <th class="cell text-right">OTP Attempts</th>
-        <th class="cell">Last OTP</th>
-        <th class="cell">Last Login</th>
-        <th class="cell">Actions</th>
+        <th class="cell w-8"><input type="checkbox" @change="toggleAll($event)" /></th>
+        <th class="cell sortable" @click="setSort('status')">Status<span class="sort-ind" x-text="sortInd('status')"></span></th>
+        <th class="cell sortable" @click="setSort('msisdn')">Nomor<span class="sort-ind" x-text="sortInd('msisdn')"></span></th>
+        <th class="cell sortable" @click="setSort('masa_aktif_until')">Masa Aktif<span class="sort-ind" x-text="sortInd('masa_aktif_until')"></span></th>
+        <th class="cell sortable" @click="setSort('paket')">Paket<span class="sort-ind" x-text="sortInd('paket')"></span></th>
+        <th class="cell w-28">Aksi</th>
       </tr>
     </thead>
     <tbody>
-      <template x-for="a in accounts" :key="a.id">
-        <tr :class="rowClass(a)">
-          <td class="cell"><input type="checkbox" :value="a.id" x-model.number="selected" /></td>
-          <td class="cell" x-text="a.id"></td>
-          <td class="cell font-mono" x-text="a.msisdn"></td>
-          <td class="cell" x-text="a.status"></td>
-          <td class="cell text-right" x-text="a.otp_attempts + ' / ' + maxAttempt"></td>
-          <td class="cell" x-text="fmtTime(a.otp_last_at)"></td>
-          <td class="cell" x-text="fmtTime(a.last_login_at)"></td>
+      <template x-for="r in filteredSorted()" :key="r.id">
+        <tr :class="r.dead ? 'row-dead' : 'row-alive'">
+          <td class="cell"><input type="checkbox" :value="r.id" x-model="selected" /></td>
           <td class="cell">
-            <button class="text-blue-700 hover:underline"    @click="resend(a.id)">Resend OTP</button>
-            <button class="text-slate-700 hover:underline ml-2" @click="pause(a)" x-text="a.status === 'paused' ? 'Resume' : 'Pause'"></button>
-            <button class="text-rose-700 hover:underline ml-2"  @click="del(a)">X</button>
+            <span class="status-badge" :class="r.dead ? 'badge-dead' : 'badge-alive'"
+                  @dblclick="showToken(r)"
+                  title="Klik 2x untuk lihat token">
+              <span x-text="r.dead ? 'MATI' : 'TIDAK MATI'"></span>
+            </span>
+          </td>
+          <td class="cell font-mono" x-text="r.msisdn"></td>
+          <td class="cell" x-text="fmtDate(r.masa_aktif_until) || '-'"></td>
+          <td class="cell" x-text="r.paket || '-'"></td>
+          <td class="cell text-xs">
+            <button class="text-blue-700 hover:underline mr-2" @click="resend(r.id)">Resend</button>
+            <button class="text-red-700 hover:underline" @click="del(r.id)">Del</button>
           </td>
         </tr>
       </template>
-      <tr x-show="!accounts.length"><td colspan="8" class="cell text-center text-slate-500 py-6">No accounts.</td></tr>
+      <tr x-show="!rows.length">
+        <td colspan="6" class="cell text-center text-slate-500 py-8 font-bold">
+          Belum ada nomor. Register di kanan atas atau Upload List.
+        </td>
+      </tr>
     </tbody>
   </table>
 </section>
 
-<footer class="bg-slate-800 text-slate-100 px-4 py-2 text-xs flex gap-6 flex-wrap">
-  <span>Total: <span x-text="stats.accounts?.total ?? 0"></span></span>
-  <span>new: <span x-text="stats.accounts?.new ?? 0"></span></span>
-  <span>otp_pending: <span x-text="stats.accounts?.otp_pending ?? 0"></span></span>
-  <span>otp_failed: <span x-text="stats.accounts?.otp_failed ?? 0"></span></span>
-  <span>available: <span x-text="stats.accounts?.available ?? 0"></span></span>
-  <span>gift_wait: <span x-text="stats.accounts?.gift_wait ?? 0"></span></span>
-  <span>gift_done: <span x-text="stats.accounts?.gift_done ?? 0"></span></span>
-  <span class="ml-auto">Gifts total: <span x-text="stats.gifts_total ?? 0"></span></span>
-  <span>Jobs pending: <span x-text="stats.jobs?.pending ?? 0"></span></span>
-  <span>running: <span x-text="stats.jobs?.running ?? 0"></span></span>
-  <span>failed: <span x-text="stats.jobs?.failed ?? 0"></span></span>
-</footer>
+<!-- Dialog: reveal token (double-click status) -->
+<dialog x-ref="tokenDlg" class="w-[600px] max-w-full">
+  <div class="p-4 bg-slate-800 text-slate-100 flex items-center">
+    <div class="font-extrabold">Token — <span x-text="tokenView.msisdn"></span></div>
+    <button class="ml-auto text-slate-300 hover:text-white" @click="$refs.tokenDlg.close()">✕</button>
+  </div>
+  <div class="p-4 space-y-3">
+    <div>
+      <label class="text-xs font-bold text-slate-600">axis_token</label>
+      <textarea readonly class="w-full h-32 border rounded p-2 font-mono text-xs" x-text="tokenView.token || '(kosong)'"></textarea>
+    </div>
+    <div>
+      <label class="text-xs font-bold text-slate-600">axis_refresh</label>
+      <textarea readonly class="w-full h-16 border rounded p-2 font-mono text-xs" x-text="tokenView.refresh || '(kosong)'"></textarea>
+    </div>
+    <button class="px-3 py-1 bg-slate-700 text-white rounded font-bold hover:bg-slate-800"
+            @click="copyToken()">Copy token</button>
+  </div>
+</dialog>
+
+<!-- Dialog: upload list -->
+<dialog x-ref="bulkDlg" class="w-[600px] max-w-full">
+  <div class="p-4 bg-slate-800 text-slate-100 flex items-center">
+    <div class="font-extrabold">Upload List Nomor</div>
+    <button class="ml-auto text-slate-300 hover:text-white" @click="$refs.bulkDlg.close()">✕</button>
+  </div>
+  <div class="p-4 space-y-3">
+    <div class="text-xs text-slate-600 font-bold">
+      Satu nomor per baris. Boleh dipisah koma/spasi/newline. Prefix 0/62/+62 otomatis di-normalize.
+    </div>
+    <textarea x-model="bulkText" class="w-full h-56 border rounded p-2 font-mono text-xs"
+              placeholder="083131234567&#10;083887654321&#10;+62831..."></textarea>
+    <div class="flex items-center gap-2">
+      <input type="file" accept=".txt,.csv" @change="loadBulkFile($event)" class="text-xs font-bold" />
+      <button class="ml-auto px-3 py-1 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700"
+              @click="submitBulk()" :disabled="bulkBusy">
+        <span x-text="bulkBusy ? 'Mengirim...' : 'Register semua'"></span>
+      </button>
+    </div>
+    <div x-show="bulkResults.length" class="max-h-40 overflow-auto border rounded text-xs">
+      <table class="min-w-full">
+        <thead class="bg-slate-100 sticky top-0"><tr>
+          <th class="cell text-left">Input</th>
+          <th class="cell text-left">Hasil</th>
+        </tr></thead>
+        <tbody>
+          <template x-for="r in bulkResults" :key="r.input">
+            <tr :class="r.error ? 'bg-red-50' : 'bg-green-50'">
+              <td class="cell font-mono" x-text="r.input"></td>
+              <td class="cell" x-text="r.error ? ('❌ ' + r.error) : ('✅ ' + r.msisdn + ' (' + r.status + ')')"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</dialog>
 
 <script>
 function mgmt() {
   return {
-    accounts: [], stats: {}, selected: [],
-    q: "", status: "", newMsisdn: "",
-    lastRefresh: "-", maxAttempt: 3,
+    rows: [], selected: [], newMsisdn: "",
+    q: "", deadFilter: "", paketFilter: "", masaMinFilter: "",
+    sortKey: "id", sortDir: "desc",
+    counts: { alive: 0, dead: 0 },
+    lastRefresh: "-",
+    tokenView: { msisdn: "", token: "", refresh: "" },
+    bulkText: "", bulkResults: [], bulkBusy: false,
+
     init() {
-      this.loadSettings();
       this.reload();
       setInterval(() => this.reload(), 5000);
     },
-    async loadSettings() {
-      const s = await fetch("/api/settings").then(r => r.json());
-      if (s["otp.max_attempt"]) this.maxAttempt = s["otp.max_attempt"];
-    },
     async reload() {
       const params = new URLSearchParams();
+      params.set("limit", "1000");
       if (this.q) params.set("q", this.q);
-      if (this.status) params.set("status", this.status);
-      params.set("limit", "500");
-      const [a, s] = await Promise.all([
-        fetch("/api/accounts?" + params.toString()).then(r => r.json()),
-        fetch("/api/stats").then(r => r.json()),
-      ]);
-      this.accounts = a || [];
-      this.stats = s || {};
-      this.lastRefresh = new Date().toLocaleTimeString();
+      if (this.deadFilter) params.set("dead", this.deadFilter);
+      params.set("sort", this.sortKey);
+      params.set("order", this.sortDir);
+      const rows = await fetch("/api/accounts?" + params.toString()).then(r => r.json()) || [];
+      this.rows = rows;
+      this.counts.alive = rows.filter(r => !r.dead).length;
+      this.counts.dead  = rows.filter(r =>  r.dead).length;
+      this.lastRefresh = new Date().toLocaleTimeString("id-ID");
     },
-    rowClass(a) {
-      if (a.status === "paused")     return "row-paused";
-      if (a.status === "otp_failed") return "row-otp-fail";
-      if (a.status === "gift_wait")  return "row-gift";
-      if (a.status === "gift_done" || a.status === "available") return "row-avail";
-      return "";
-    },
-    fmtTime(s) { return s ? new Date(s).toLocaleString("id-ID") : "-"; },
-    allSelected() { return this.accounts.length > 0 && this.selected.length === this.accounts.length; },
-    toggleAll(ev) { this.selected = ev.target.checked ? this.accounts.map(a => a.id) : []; },
 
-    async register() {
-      const m = this.newMsisdn.trim();
-      if (!m) return;
-      const res = await fetch(`/api/register`, {
+    filteredSorted() {
+      let r = this.rows;
+      if (this.paketFilter) {
+        const p = this.paketFilter.toLowerCase();
+        r = r.filter(x => (x.paket || "").toLowerCase().includes(p));
+      }
+      if (this.masaMinFilter) {
+        const min = new Date(this.masaMinFilter).getTime();
+        r = r.filter(x => x.masa_aktif_until && new Date(x.masa_aktif_until).getTime() >= min);
+      }
+      // Server sudah sort; ini hanya fallback jika ada filter lokal.
+      return r;
+    },
+
+    setSort(k) {
+      if (this.sortKey === k) {
+        this.sortDir = this.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        this.sortKey = k;
+        this.sortDir = "asc";
+      }
+      this.reload();
+    },
+    sortInd(k) {
+      if (this.sortKey !== k) return "";
+      return this.sortDir === "asc" ? "▲" : "▼";
+    },
+
+    toggleAll(e) {
+      this.selected = e.target.checked ? this.rows.map(r => r.id) : [];
+    },
+    async addOne() {
+      if (!this.newMsisdn.trim()) return;
+      const res = await fetch("/api/register", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({msisdn: m}),
+        body: JSON.stringify({msisdn: this.newMsisdn.trim()}),
       });
-      if (!res.ok) {
-        alert("Register gagal: " + (await res.text()));
-        return;
-      }
-      this.newMsisdn = ""; this.reload();
+      if (!res.ok) { alert("Register gagal: " + await res.text()); return; }
+      this.newMsisdn = "";
+      this.reload();
     },
     async resend(id) {
-      await fetch(`/api/accounts/${id}/resend`, { method: "POST" });
+      await fetch(`/api/accounts/${id}/resend`, {method:"POST"});
+      this.reload();
+    },
+    async del(id) {
+      if (!confirm("Hapus nomor ini?")) return;
+      await fetch(`/api/accounts/${id}`, {method:"DELETE"});
       this.reload();
     },
     async bulkResend() {
-      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}/resend`, { method: "POST" })));
+      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}/resend`, {method:"POST"})));
       this.selected = []; this.reload();
     },
-    async pause(a) {
-      const path = a.status === "paused" ? "resume" : "pause";
-      await fetch(`/api/accounts/${a.id}/${path}`, { method: "POST" });
-      this.reload();
-    },
-    async bulkPause(paused) {
-      const path = paused ? "pause" : "resume";
-      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}/${path}`, { method: "POST" })));
+    async bulkPause() {
+      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}/pause`, {method:"POST"})));
       this.selected = []; this.reload();
-    },
-    async del(a) {
-      if (!confirm(`Delete ${a.msisdn}?`)) return;
-      await fetch(`/api/accounts/${a.id}`, { method: "DELETE" });
-      this.reload();
     },
     async bulkDelete() {
-      if (!confirm(`Delete ${this.selected.length} accounts?`)) return;
-      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}`, { method: "DELETE" })));
+      if (!confirm(`Hapus ${this.selected.length} nomor?`)) return;
+      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}`, {method:"DELETE"})));
       this.selected = []; this.reload();
     },
+
+    // --- Token reveal ---
+    async showToken(row) {
+      const r = await fetch(`/api/accounts/${row.id}/token`).then(x => x.json());
+      this.tokenView = { msisdn: r.msisdn, token: r.token, refresh: r.refresh };
+      this.$refs.tokenDlg.showModal();
+    },
+    copyToken() {
+      navigator.clipboard.writeText(this.tokenView.token || "");
+    },
+
+    // --- Bulk upload ---
+    async loadBulkFile(e) {
+      const f = e.target.files[0]; if (!f) return;
+      this.bulkText = await f.text();
+    },
+    async submitBulk() {
+      this.bulkBusy = true;
+      this.bulkResults = [];
+      try {
+        const res = await fetch("/api/accounts/bulk", {
+          method: "POST",
+          headers: {"Content-Type":"text/plain"},
+          body: this.bulkText,
+        }).then(r => r.json());
+        this.bulkResults = res.results || [];
+        this.reload();
+      } finally {
+        this.bulkBusy = false;
+      }
+    },
+
+    // --- format helpers ---
+    fmtDate(s) { return s ? new Date(s).toLocaleDateString("id-ID") : ""; },
   }
 }
 </script>
