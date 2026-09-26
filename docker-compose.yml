@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-axisbridge}
+      POSTGRES_USER: ${POSTGRES_USER:-axis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-axispass}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5000}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-axis}", "-d", "${POSTGRES_DB:-axisbridge}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  axis-core:
+    build:
+      context: .
+      target: axis-core
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-axis}:${POSTGRES_PASSWORD:-axispass}@postgres:5432/${POSTGRES_DB:-axisbridge}?sslmode=disable
+      CORE_ADDR: ":1213"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${CORE_PORT:-5001}:1213"
+
+  register-worker:
+    build:
+      context: .
+      target: register-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      axis-core:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-axis}:${POSTGRES_PASSWORD:-axispass}@postgres:5432/${POSTGRES_DB:-axisbridge}?sslmode=disable
+      WORKER_CONCURRENCY: ${REGISTER_CONCURRENCY:-2}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  gift-worker:
+    build:
+      context: .
+      target: gift-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      axis-core:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-axis}:${POSTGRES_PASSWORD:-axispass}@postgres:5432/${POSTGRES_DB:-axisbridge}?sslmode=disable
+      WORKER_CONCURRENCY: ${GIFT_CONCURRENCY:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  axis-ui:
+    build:
+      context: .
+      target: axis-ui
+    restart: unless-stopped
+    depends_on:
+      axis-core:
+        condition: service_started
+    environment:
+      UI_ADDR: ":8080"
+      CORE_URL: http://axis-core:1213
+      UI_USER: ${UI_USER:-admin}
+      UI_PASS: ${UI_PASS:-admin}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${UI_BIND:-0.0.0.0}:${UI_PORT:-5002}:8080"
+
+volumes:
+  pgdata:

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<title>axisbridge — Management</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+<style>
+  html, body { height: 100%; }
+  body { font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
+  .row-otp-fail { background: #fee2e2; }
+  .row-gift     { background: #fef9c3; }
+  .row-avail    { background: #dcfce7; }
+  .row-paused   { background: #e5e7eb; }
+  .cell         { padding: 4px 8px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+  .table-scroll { max-height: calc(100vh - 220px); overflow: auto; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-900" x-data="mgmt()" x-init="init()">
+
+<header class="bg-slate-800 text-slate-100 px-4 py-2 flex items-center gap-4">
+  <div class="font-semibold">axisbridge</div>
+  <nav class="flex gap-3 text-sm">
+    <a href="/management" class="px-2 py-1 rounded bg-slate-700">Management</a>
+    <a href="/gifts"      class="px-2 py-1 rounded hover:bg-slate-700">Gift List</a>
+    <a href="/setting"    class="px-2 py-1 rounded hover:bg-slate-700">Setting</a>
+  </nav>
+  <div class="ml-auto text-xs opacity-70" x-text="'Last refresh: ' + lastRefresh"></div>
+</header>
+
+<section class="p-3 flex flex-wrap gap-2 items-center bg-white border-b">
+  <input type="search" placeholder="Search msisdn…" class="border rounded px-2 py-1 text-sm" x-model.debounce.300ms="q" @input="reload()" />
+  <select class="border rounded px-2 py-1 text-sm" x-model="status" @change="reload()">
+    <option value="">All status</option>
+    <option value="new">new</option>
+    <option value="otp_pending">otp_pending</option>
+    <option value="otp_failed">otp_failed</option>
+    <option value="available">available</option>
+    <option value="gift_wait">gift_wait</option>
+    <option value="gift_done">gift_done</option>
+    <option value="dead">dead</option>
+    <option value="paused">paused</option>
+  </select>
+  <button class="px-2 py-1 border rounded text-sm hover:bg-slate-100" @click="reload()">Refresh</button>
+
+  <div class="ml-4 flex gap-2 items-center text-sm" x-show="selected.length">
+    <span x-text="selected.length + ' selected'"></span>
+    <button class="px-2 py-1 bg-blue-600 text-white rounded"  @click="bulkResend()">Resend OTP</button>
+    <button class="px-2 py-1 bg-slate-600 text-white rounded" @click="bulkPause(true)">Pause</button>
+    <button class="px-2 py-1 bg-slate-600 text-white rounded" @click="bulkPause(false)">Resume</button>
+    <button class="px-2 py-1 bg-rose-600 text-white rounded"  @click="bulkDelete()">Delete</button>
+  </div>
+
+  <div class="ml-auto flex gap-2 items-center">
+    <input placeholder="Register msisdn (08.. / 62..)" class="border rounded px-2 py-1 text-sm w-64" x-model="newMsisdn" @keydown.enter="register()" />
+    <button class="px-2 py-1 bg-slate-800 text-white rounded text-sm" @click="register()">Register</button>
+  </div>
+</section>
+
+<section class="table-scroll bg-white">
+  <table class="min-w-full text-xs">
+    <thead class="bg-slate-200 sticky top-0">
+      <tr>
+        <th class="cell w-8"><input type="checkbox" @change="toggleAll($event)" :checked="allSelected()" /></th>
+        <th class="cell">ID</th>
+        <th class="cell">Nomor</th>
+        <th class="cell">Status</th>
+        <th class="cell text-right">OTP Attempts</th>
+        <th class="cell">Last OTP</th>
+        <th class="cell">Last Login</th>
+        <th class="cell">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <template x-for="a in accounts" :key="a.id">
+        <tr :class="rowClass(a)">
+          <td class="cell"><input type="checkbox" :value="a.id" x-model.number="selected" /></td>
+          <td class="cell" x-text="a.id"></td>
+          <td class="cell font-mono" x-text="a.msisdn"></td>
+          <td class="cell" x-text="a.status"></td>
+          <td class="cell text-right" x-text="a.otp_attempts + ' / ' + maxAttempt"></td>
+          <td class="cell" x-text="fmtTime(a.otp_last_at)"></td>
+          <td class="cell" x-text="fmtTime(a.last_login_at)"></td>
+          <td class="cell">
+            <button class="text-blue-700 hover:underline"    @click="resend(a.id)">Resend OTP</button>
+            <button class="text-slate-700 hover:underline ml-2" @click="pause(a)" x-text="a.status === 'paused' ? 'Resume' : 'Pause'"></button>
+            <button class="text-rose-700 hover:underline ml-2"  @click="del(a)">X</button>
+          </td>
+        </tr>
+      </template>
+      <tr x-show="!accounts.length"><td colspan="8" class="cell text-center text-slate-500 py-6">No accounts.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer class="bg-slate-800 text-slate-100 px-4 py-2 text-xs flex gap-6 flex-wrap">
+  <span>Total: <span x-text="stats.accounts?.total ?? 0"></span></span>
+  <span>new: <span x-text="stats.accounts?.new ?? 0"></span></span>
+  <span>otp_pending: <span x-text="stats.accounts?.otp_pending ?? 0"></span></span>
+  <span>otp_failed: <span x-text="stats.accounts?.otp_failed ?? 0"></span></span>
+  <span>available: <span x-text="stats.accounts?.available ?? 0"></span></span>
+  <span>gift_wait: <span x-text="stats.accounts?.gift_wait ?? 0"></span></span>
+  <span>gift_done: <span x-text="stats.accounts?.gift_done ?? 0"></span></span>
+  <span class="ml-auto">Gifts total: <span x-text="stats.gifts_total ?? 0"></span></span>
+  <span>Jobs pending: <span x-text="stats.jobs?.pending ?? 0"></span></span>
+  <span>running: <span x-text="stats.jobs?.running ?? 0"></span></span>
+  <span>failed: <span x-text="stats.jobs?.failed ?? 0"></span></span>
+</footer>
+
+<script>
+function mgmt() {
+  return {
+    accounts: [], stats: {}, selected: [],
+    q: "", status: "", newMsisdn: "",
+    lastRefresh: "-", maxAttempt: 3,
+    init() {
+      this.loadSettings();
+      this.reload();
+      setInterval(() => this.reload(), 5000);
+    },
+    async loadSettings() {
+      const s = await fetch("/api/settings").then(r => r.json());
+      if (s["otp.max_attempt"]) this.maxAttempt = s["otp.max_attempt"];
+    },
+    async reload() {
+      const params = new URLSearchParams();
+      if (this.q) params.set("q", this.q);
+      if (this.status) params.set("status", this.status);
+      params.set("limit", "500");
+      const [a, s] = await Promise.all([
+        fetch("/api/accounts?" + params.toString()).then(r => r.json()),
+        fetch("/api/stats").then(r => r.json()),
+      ]);
+      this.accounts = a || [];
+      this.stats = s || {};
+      this.lastRefresh = new Date().toLocaleTimeString();
+    },
+    rowClass(a) {
+      if (a.status === "paused")     return "row-paused";
+      if (a.status === "otp_failed") return "row-otp-fail";
+      if (a.status === "gift_wait")  return "row-gift";
+      if (a.status === "gift_done" || a.status === "available") return "row-avail";
+      return "";
+    },
+    fmtTime(s) { return s ? new Date(s).toLocaleString("id-ID") : "-"; },
+    allSelected() { return this.accounts.length > 0 && this.selected.length === this.accounts.length; },
+    toggleAll(ev) { this.selected = ev.target.checked ? this.accounts.map(a => a.id) : []; },
+
+    async register() {
+      const m = this.newMsisdn.trim();
+      if (!m) return;
+      const res = await fetch(`/api/register`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({msisdn: m}),
+      });
+      if (!res.ok) {
+        alert("Register gagal: " + (await res.text()));
+        return;
+      }
+      this.newMsisdn = ""; this.reload();
+    },
+    async resend(id) {
+      await fetch(`/api/accounts/${id}/resend`, { method: "POST" });
+      this.reload();
+    },
+    async bulkResend() {
+      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}/resend`, { method: "POST" })));
+      this.selected = []; this.reload();
+    },
+    async pause(a) {
+      const path = a.status === "paused" ? "resume" : "pause";
+      await fetch(`/api/accounts/${a.id}/${path}`, { method: "POST" });
+      this.reload();
+    },
+    async bulkPause(paused) {
+      const path = paused ? "pause" : "resume";
+      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}/${path}`, { method: "POST" })));
+      this.selected = []; this.reload();
+    },
+    async del(a) {
+      if (!confirm(`Delete ${a.msisdn}?`)) return;
+      await fetch(`/api/accounts/${a.id}`, { method: "DELETE" });
+      this.reload();
+    },
+    async bulkDelete() {
+      if (!confirm(`Delete ${this.selected.length} accounts?`)) return;
+      await Promise.all(this.selected.map(id => fetch(`/api/accounts/${id}`, { method: "DELETE" })));
+      this.selected = []; this.reload();
+    },
+  }
+}
+</script>
+</body>
+</html>

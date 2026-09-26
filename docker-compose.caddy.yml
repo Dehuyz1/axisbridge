@@ -1,0 +1,27 @@
+# Optional overlay: put Caddy in front for HTTPS via Let's Encrypt.
+# Prereq: set UI_BIND=127.0.0.1 in .env so axis-ui is only reachable via Caddy.
+# Prereq: point CADDY_DOMAIN (e.g. axis.example.com) A/AAAA to this VPS.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d --build
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - axis-ui
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?set CADDY_DOMAIN in .env}
+      CADDY_EMAIL:  ${CADDY_EMAIL:?set CADDY_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
