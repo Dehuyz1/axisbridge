@@ -19,6 +19,7 @@ import (
 
 	"axisbridge/internal/api"
 	"axisbridge/internal/db"
+	"axisbridge/internal/renew"
 	"axisbridge/internal/settings"
 )
 
@@ -52,6 +53,12 @@ func main() {
 		os.Exit(1)
 	}
 	go store.Run(ctx)
+
+	// Renew scanner lives here rather than in its own binary: it only issues
+	// INSERT ... SELECT against the database axis-core already owns, so it
+	// needs no separate crash domain.
+	scanner := &renew.Scanner{Pool: pool, Settings: store, Logger: logger}
+	go scanner.Run(ctx)
 
 	srv := &api.Server{Pool: pool, Settings: store, Logger: logger}
 	mux := http.NewServeMux()
