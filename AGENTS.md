@@ -82,6 +82,7 @@ Defaults inserted by `0001_init.sql`.
 - **`LISTEN` never wakes**: check `postgres` logs for `NOTIFY` reaching the
   channel. Fallback poll still runs every 5s so nothing stalls.
 - **UI shows `502 core upstream unreachable`**: `axis-core` is down or
-  `CORE_URL` is wrong. `docker compose logs axis-core`.
+  `CORE_URL` is wrong. Logs: `docker compose logs axis-core` (docker compose
+  deploy) or `journalctl -u axis-core -n 50 --no-pager` (systemd/Kainode).
 - **`ERROR: cannot change name of input parameter` on migrate**: schema
   changed — bump migration file, do not edit `0001_init.sql` in place.
