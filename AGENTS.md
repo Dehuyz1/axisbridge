@@ -18,7 +18,7 @@
 go run ./cmd/axis-core
 go run ./cmd/axis-worker
 go run ./cmd/ovo-payer
-UI_PASS=admin go run ./cmd/axis-ui
+go run ./cmd/axis-ui
 
 # build all
 go build -o bin/ ./cmd/...
@@ -64,7 +64,7 @@ docker compose logs -f axis-core
 Bootstrap env (see `.env.example`):
 
 ```
-DATABASE_URL, CORE_ADDR, UI_ADDR, CORE_URL, UI_USER, UI_PASS,
+DATABASE_URL, CORE_ADDR, UI_ADDR, CORE_URL,
 OVO_MASTER_KEY, WORKER_CONCURRENCY, LOG_LEVEL
 ```
 

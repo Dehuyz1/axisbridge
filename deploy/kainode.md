@@ -39,19 +39,20 @@ Wajib set di `.env`:
 
 ```
 POSTGRES_PASSWORD=<random 32 char>
-UI_USER=admin
-UI_PASS=<random 32 char>
 OVO_MASTER_KEY=<hex 64 char>   # openssl rand -hex 32
 UI_BIND=127.0.0.1              # kalau pakai Caddy
 CADDY_DOMAIN=axis.example.com  # kalau pakai Caddy
 CADDY_EMAIL=you@example.com
 ```
 
+Catatan: UI tidak punya autentikasi bawaan. Pastikan `UI_BIND=127.0.0.1`
+dan gunakan Caddy/Nginx kalau UI diekspos ke internet.
+
 Generate secret cepat:
 
 ```bash
 openssl rand -hex 32   # untuk OVO_MASTER_KEY
-openssl rand -base64 24 # untuk UI_PASS / POSTGRES_PASSWORD
+openssl rand -base64 24 # untuk POSTGRES_PASSWORD
 ```
 
 ## 3. Bring up
@@ -61,7 +62,7 @@ openssl rand -base64 24 # untuk UI_PASS / POSTGRES_PASSWORD
 ```bash
 # set UI_BIND=0.0.0.0 di .env
 docker compose up -d --build
-# akses: http://<ip-vps>:5002  (basic auth UI_USER/UI_PASS)
+# akses: http://<ip-vps>:5002  (tanpa auth — pastikan firewall atau reverse proxy melindungi)
 ```
 
 ### Mode B: Caddy + HTTPS otomatis (recommended)

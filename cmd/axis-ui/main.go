@@ -1,18 +1,18 @@
 // axis-ui: serves 3 dashboards (Management, Gift List, Setting) and
-// reverse-proxies /api/* to axis-core. Basic auth on everything.
+// reverse-proxies /api/* to axis-core.
+//
+// WARNING: the dashboard has no built-in authentication. If exposed to the
+// public internet, front it with a reverse proxy that enforces access control.
 //
 // Env:
 //
 //	UI_ADDR      listen addr, default :8080
 //	CORE_URL     axis-core base URL, default http://localhost:1213
-//	UI_USER      basic auth user, default admin
-//	UI_PASS      basic auth password (required)
 //	LOG_LEVEL    debug|info|warn|error, default info
 package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"embed"
 	"errors"
 	"io/fs"
@@ -35,13 +35,6 @@ func main() {
 
 	addr := envDefault("UI_ADDR", ":8080")
 	coreURL := envDefault("CORE_URL", "http://localhost:1213")
-	user := envDefault("UI_USER", "admin")
-	pass := os.Getenv("UI_PASS")
-	if pass == "" {
-		logger.Error("UI_PASS is required")
-		os.Exit(2)
-	}
-
 	coreParsed, err := url.Parse(coreURL)
 	if err != nil {
 		logger.Error("invalid CORE_URL", "err", err)
@@ -75,14 +68,12 @@ func main() {
 		}
 	})
 
-	handler := basicAuth(user, pass, mux)
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           requestLog(logger, handler),
+		Handler:           requestLog(logger, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -108,20 +99,6 @@ func serveFile(w http.ResponseWriter, r *http.Request, sub fs.FS, name string) {
 	_, _ = w.Write(b)
 }
 
-func basicAuth(user, pass string, next http.Handler) http.Handler {
-	realm := `Basic realm="axisbridge"`
-	uB := []byte(user)
-	pB := []byte(pass)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, p, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(u), uB) != 1 || subtle.ConstantTimeCompare([]byte(p), pB) != 1 {
-			w.Header().Set("WWW-Authenticate", realm)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
 
 func envDefault(k, def string) string {
 	if v := os.Getenv(k); v != "" {

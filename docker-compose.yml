@@ -72,8 +72,6 @@ services:
     environment:
       UI_ADDR: ":8080"
       CORE_URL: http://axis-core:1213
-      UI_USER: ${UI_USER:-admin}
-      UI_PASS: ${UI_PASS:-admin}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${UI_BIND:-0.0.0.0}:${UI_PORT:-5002}:8080"

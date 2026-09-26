@@ -9,8 +9,8 @@ truth.
 - 4 binaries: `cmd/axis-core`, `cmd/axis-worker`, `cmd/ovo-payer`,
   `cmd/axis-ui`.
 - Shared code under `internal/`.
-- UI is 2 pages: `/management`, `/setting`. Basic auth via `UI_USER` /
-  `UI_PASS`.
+- UI is 3 pages: `/management`, `/gifts`, `/setting`. No built-in auth —
+  protect with a reverse proxy if exposed publicly.
 - Job queue is Postgres — LISTEN/NOTIFY + `FOR UPDATE SKIP LOCKED`.
 - Runtime config in `settings` table, editable from `/setting`.
 

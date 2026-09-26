@@ -29,9 +29,9 @@ Split rewrite of the monolithic `axisbridgev2`. Postgres-backed queue
 
 ```bash
 cp .env.example .env
-# set UI_PASS + OVO_MASTER_KEY
+# set OVO_MASTER_KEY in .env
 docker compose up -d --build
-# UI      http://localhost:5002     (basic auth: UI_USER / UI_PASS)
+# UI      http://localhost:5002     (no auth — front with reverse proxy if public)
 # core    http://localhost:5001/healthz
 ```
 
@@ -73,7 +73,7 @@ internal/
 
 Two layers:
 
-- **Bootstrap** (`.env`): `DATABASE_URL`, ports, `UI_PASS`. Wajib ada
+- **Bootstrap** (`.env`): `DATABASE_URL`, ports, `OVO_MASTER_KEY`. Wajib ada
   sebelum Postgres reachable.
 - **Runtime** (`settings` table, editable dari `/setting` UI):
   `otp.max_attempt`, `otp.retry_gap`, `otp.debounce`, `gift.quota_daily`,
