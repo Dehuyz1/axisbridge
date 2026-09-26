@@ -19,6 +19,7 @@
   <nav class="flex gap-3 text-sm font-bold">
     <a href="/management" class="px-2 py-1 rounded hover:bg-slate-700">Management</a>
     <a href="/gifts"      class="px-2 py-1 rounded hover:bg-slate-700">Gift List</a>
+    <a href="/ovo"        class="px-2 py-1 rounded hover:bg-slate-700">OVO</a>
     <a href="/setting"    class="px-2 py-1 rounded bg-slate-700">Setting</a>
   </nav>
   <div class="ml-auto text-xs font-bold" x-text="saveStatus"></div>
@@ -40,7 +41,9 @@
               <input :id="f.key" type="checkbox" x-model="values[f.key]" @change="save(f)" class="h-5 w-5" />
             </template>
             <template x-if="f.type !== 'bool'">
-              <input :id="f.key" :type="f.type === 'int' ? 'number' : 'text'"
+              <input :id="f.key"
+                     :type="(f.type === 'int' || f.type === 'negint') ? 'number' : 'text'"
+                     :max="f.type === 'negint' ? -1 : null"
                      x-model="values[f.key]" @change="save(f)"
                      class="border rounded px-2 py-1 text-sm col-span-1 w-40" />
             </template>
@@ -69,8 +72,10 @@ function settings() {
         { key: "otp.debounce",    label: "Debounce",    type: "string", hint: "Cooldown push nomor duplikat (mis. 10m)" },
       ]},
       { title: "Renew", fields: [
-        { key: "renew.enabled",    label: "Renew enabled",    type: "bool",   hint: "Aktifkan worker renew (masih di roadmap; setting hanya disimpan)" },
-        { key: "renew.minus_days", label: "Minus days",       type: "int",    hint: "Renew mulai berapa hari sebelum masa aktif habis (mis. 3 = renew jika sisa ≤ 3 hari)" },
+        { key: "renew.enabled",    label: "Renew enabled",    type: "bool",   hint: "Aktifkan scanner renew" },
+        { key: "renew.minus_days", label: "Minus days",       type: "negint", hint: "WAJIB negatif. -30 = renew nomor yang masa aktifnya sudah lewat 30 hari atau lebih" },
+        { key: "renew.cooldown",   label: "Cooldown",         type: "string", hint: "Jeda minimum antar charge pada satu nomor (mis. 20h)" },
+        { key: "renew.scan_every", label: "Scan interval",    type: "string", hint: "Seberapa sering scanner memeriksa kandidat renew (mis. 5m)" },
       ]},
       { title: "Gift", fields: [
         { key: "gift.quota_daily", label: "Quota Daily", type: "int", hint: "Batas gift sukses per hari (global)" },
@@ -114,6 +119,13 @@ function settings() {
       this.reload();
     },
     coerce(field, v) {
+      if (field.type === "negint") {
+        // Semantik renew: nilai harus negatif (-30 = masa aktif sudah lewat
+        // 30 hari). Angka positif atau 0 dinormalkan supaya tidak tersimpan
+        // dalam bentuk yang scanner salah artikan.
+        const n = Math.trunc(Number(v)) || 0;
+        return n >= 0 ? -Math.abs(n || 1) : n;
+      }
       if (field.type === "int")  return Number(v);
       if (field.type === "bool") return Boolean(v);
       return String(v);

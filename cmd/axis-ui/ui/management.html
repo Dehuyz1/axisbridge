@@ -13,15 +13,16 @@
   table.mgmt-table td, table.mgmt-table th { font-weight: 700; }
   .cell { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
   .table-scroll { max-height: calc(100vh - 220px); overflow: auto; }
-  .row-dead  { background: #fee2e2; }
+  .row-login { background: #fee2e2; }
   .row-alive { background: #dcfce7; }
   .sortable { cursor: pointer; user-select: none; }
   .sortable:hover { background: #cbd5e1; }
   .sort-ind { font-size: 10px; margin-left: 4px; opacity: 0.7; }
-  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
-                  font-weight: 800; font-size: 12px; cursor: pointer; user-select: none; }
-  .badge-alive { background: #16a34a; color: white; }
-  .badge-dead  { background: #dc2626; color: white; }
+  /* Status = warna saja, tanpa teks. Hijau hidup, merah butuh login. */
+  .status-dot { display: inline-block; width: 16px; height: 16px; border-radius: 999px;
+                cursor: pointer; user-select: none; border: 2px solid rgba(0,0,0,0.15); }
+  .dot-alive { background: #16a34a; }
+  .dot-login { background: #dc2626; }
   dialog { border-radius: 8px; padding: 0; border: 1px solid #cbd5e1; }
   dialog::backdrop { background: rgba(0,0,0,0.5); }
   input, select, textarea { font-weight: 600; }
@@ -34,12 +35,13 @@
   <nav class="flex gap-3 text-sm font-bold">
     <a href="/management" class="px-2 py-1 rounded bg-slate-700">Management</a>
     <a href="/gifts"      class="px-2 py-1 rounded hover:bg-slate-700">Gift List</a>
+    <a href="/ovo"        class="px-2 py-1 rounded hover:bg-slate-700">OVO</a>
     <a href="/setting"    class="px-2 py-1 rounded hover:bg-slate-700">Setting</a>
   </nav>
   <div class="ml-auto text-xs opacity-80 font-bold">
     Total: <span x-text="rows.length"></span> ·
-    Alive: <span x-text="counts.alive"></span> ·
-    Dead: <span x-text="counts.dead"></span> ·
+    Hidup: <span x-text="counts.alive"></span> ·
+    Butuh login: <span x-text="counts.login"></span> ·
     Last refresh: <span x-text="lastRefresh"></span>
   </div>
 </header>
@@ -47,11 +49,15 @@
 <section class="p-3 flex flex-wrap gap-2 items-center bg-white border-b">
   <input type="search" placeholder="Search nomor..." class="border rounded px-2 py-1 text-sm"
          x-model.debounce.300ms="q" @input="reload()" />
-  <select class="border rounded px-2 py-1 text-sm" x-model="deadFilter" @change="reload()">
-    <option value="">Semua</option>
-    <option value="false">Tidak Mati</option>
-    <option value="true">Mati</option>
+  <select class="border rounded px-2 py-1 text-sm" x-model="loginFilter">
+    <option value="">Semua status</option>
+    <option value="alive">Hidup (hijau)</option>
+    <option value="login">Butuh login (merah)</option>
   </select>
+  <span class="flex items-center gap-2 text-xs font-bold text-slate-600">
+    <span class="status-dot dot-alive" style="cursor:default"></span>hidup
+    <span class="status-dot dot-login ml-2" style="cursor:default"></span>butuh login
+  </span>
   <input placeholder="Filter paket..." class="border rounded px-2 py-1 text-sm"
          x-model.debounce.300ms="paketFilter" />
   <input type="date" class="border rounded px-2 py-1 text-sm" x-model="masaMinFilter" title="Masa aktif >= tanggal ini" />
@@ -81,7 +87,7 @@
     <thead class="bg-slate-200 sticky top-0">
       <tr>
         <th class="cell w-8"><input type="checkbox" @change="toggleAll($event)" /></th>
-        <th class="cell sortable" @click="setSort('status')">Status<span class="sort-ind" x-text="sortInd('status')"></span></th>
+        <th class="cell sortable w-16" @click="setSort('dead')">Status<span class="sort-ind" x-text="sortInd('dead')"></span></th>
         <th class="cell sortable" @click="setSort('msisdn')">Nomor<span class="sort-ind" x-text="sortInd('msisdn')"></span></th>
         <th class="cell sortable" @click="setSort('masa_aktif_until')">Masa Aktif<span class="sort-ind" x-text="sortInd('masa_aktif_until')"></span></th>
         <th class="cell sortable" @click="setSort('paket')">Paket<span class="sort-ind" x-text="sortInd('paket')"></span></th>
@@ -90,14 +96,13 @@
     </thead>
     <tbody>
       <template x-for="r in filteredSorted()" :key="r.id">
-        <tr :class="r.dead ? 'row-dead' : 'row-alive'">
+        <tr :class="needsLogin(r) ? 'row-login' : 'row-alive'">
           <td class="cell"><input type="checkbox" :value="r.id" x-model="selected" /></td>
           <td class="cell">
-            <span class="status-badge" :class="r.dead ? 'badge-dead' : 'badge-alive'"
+            <span class="status-dot"
+                  :class="needsLogin(r) ? 'dot-login' : 'dot-alive'"
                   @dblclick="showToken(r)"
-                  title="Klik 2x untuk lihat token">
-              <span x-text="r.dead ? 'MATI' : 'TIDAK MATI'"></span>
-            </span>
+                  :title="(needsLogin(r) ? 'Butuh login' : 'Hidup') + ' — klik 2x untuk lihat token'"></span>
           </td>
           <td class="cell font-mono" x-text="r.msisdn"></td>
           <td class="cell" x-text="fmtDate(r.masa_aktif_until) || '-'"></td>
@@ -179,9 +184,9 @@
 function mgmt() {
   return {
     rows: [], selected: [], newMsisdn: "",
-    q: "", deadFilter: "", paketFilter: "", masaMinFilter: "",
+    q: "", loginFilter: "", paketFilter: "", masaMinFilter: "",
     sortKey: "id", sortDir: "desc",
-    counts: { alive: 0, dead: 0 },
+    counts: { alive: 0, login: 0 },
     lastRefresh: "-",
     tokenView: { msisdn: "", token: "", refresh: "" },
     bulkText: "", bulkResults: [], bulkBusy: false,
@@ -194,18 +199,25 @@ function mgmt() {
       const params = new URLSearchParams();
       params.set("limit", "1000");
       if (this.q) params.set("q", this.q);
-      if (this.deadFilter) params.set("dead", this.deadFilter);
       params.set("sort", this.sortKey);
       params.set("order", this.sortDir);
       const rows = await fetch("/api/accounts?" + params.toString()).then(r => r.json()) || [];
       this.rows = rows;
-      this.counts.alive = rows.filter(r => !r.dead).length;
-      this.counts.dead  = rows.filter(r =>  r.dead).length;
+      this.counts.alive = rows.filter(r => !this.needsLogin(r)).length;
+      this.counts.login = rows.filter(r =>  this.needsLogin(r)).length;
       this.lastRefresh = new Date().toLocaleTimeString("id-ID");
+    },
+
+    // Hijau = punya token AXIS aktif. Merah = perlu login (belum pernah
+    // login, token hilang, atau SIM sudah ditandai mati).
+    needsLogin(r) {
+      return r.dead || !r.has_token;
     },
 
     filteredSorted() {
       let r = this.rows;
+      if (this.loginFilter === "alive") r = r.filter(x => !this.needsLogin(x));
+      if (this.loginFilter === "login") r = r.filter(x =>  this.needsLogin(x));
       if (this.paketFilter) {
         const p = this.paketFilter.toLowerCase();
         r = r.filter(x => (x.paket || "").toLowerCase().includes(p));

@@ -15,7 +15,9 @@
   .sortable { cursor: pointer; user-select: none; }
   .sortable:hover { background: #cbd5e1; }
   .sort-ind { font-size: 10px; margin-left: 4px; opacity: 0.7; }
-  .col-ovo { background: #fef3c7; }  /* accent kuning ringan utk kolom OVO */
+  /* Kolom OVO dibedakan pakai garis pemisah, bukan latar berbeda, supaya
+     konsisten dengan tabel di halaman lain. */
+  .col-ovo-start { border-left: 2px solid #cbd5e1; }
   input, textarea, select { font-weight: 600; }
 </style>
 </head>
@@ -26,6 +28,7 @@
   <nav class="flex gap-3 text-sm font-bold">
     <a href="/management" class="px-2 py-1 rounded hover:bg-slate-700">Management</a>
     <a href="/gifts"      class="px-2 py-1 rounded bg-slate-700">Gift List</a>
+    <a href="/ovo"        class="px-2 py-1 rounded hover:bg-slate-700">OVO</a>
     <a href="/setting"    class="px-2 py-1 rounded hover:bg-slate-700">Setting</a>
   </nav>
   <div class="ml-auto text-xs opacity-80 font-bold">
@@ -71,9 +74,9 @@
         <th class="cell sortable" @click="setSort('paket')">Paket<span class="sort-ind" x-text="ind('paket')"></span></th>
         <th class="cell sortable text-right" @click="setSort('amount')">Nominal<span class="sort-ind" x-text="ind('amount')"></span></th>
         <th class="cell sortable" @click="setSort('trx_id')">Trx ID<span class="sort-ind" x-text="ind('trx_id')"></span></th>
-        <th class="cell col-ovo sortable" @click="setSort('ovo_msisdn')">OVO Nomor<span class="sort-ind" x-text="ind('ovo_msisdn')"></span></th>
-        <th class="cell col-ovo sortable" @click="setSort('ovo_trx_id')">OVO Trx<span class="sort-ind" x-text="ind('ovo_trx_id')"></span></th>
-        <th class="cell col-ovo sortable text-right" @click="setSort('ovo_amount')">OVO Bayar<span class="sort-ind" x-text="ind('ovo_amount')"></span></th>
+        <th class="cell col-ovo-start sortable" @click="setSort('ovo_msisdn')">OVO Nomor<span class="sort-ind" x-text="ind('ovo_msisdn')"></span></th>
+        <th class="cell sortable" @click="setSort('ovo_trx_id')">OVO Trx<span class="sort-ind" x-text="ind('ovo_trx_id')"></span></th>
+        <th class="cell sortable text-right" @click="setSort('ovo_amount')">OVO Bayar<span class="sort-ind" x-text="ind('ovo_amount')"></span></th>
         <th class="cell sortable" @click="setSort('created_at')">Waktu<span class="sort-ind" x-text="ind('created_at')"></span></th>
         <th class="cell w-20">Aksi</th>
       </tr>
@@ -86,9 +89,9 @@
           <td class="cell" x-text="displayPaket(r) || '-'"></td>
           <td class="cell text-right" x-text="fmtRp(r.amount)"></td>
           <td class="cell font-mono text-xs" x-text="displayTrx(r) || '-'"></td>
-          <td class="cell font-mono col-ovo" x-text="r.ovo_msisdn || '-'"></td>
-          <td class="cell font-mono text-xs col-ovo" x-text="r.ovo_trx_id || '-'"></td>
-          <td class="cell text-right col-ovo" x-text="fmtRp(r.ovo_amount)"></td>
+          <td class="cell font-mono col-ovo-start" x-text="r.ovo_msisdn || '-'"></td>
+          <td class="cell font-mono text-xs" x-text="r.ovo_trx_id || '-'"></td>
+          <td class="cell text-right" x-text="fmtRp(r.ovo_amount)"></td>
           <td class="cell text-xs" x-text="fmtTime(r.created_at)"></td>
           <td class="cell text-xs">
             <button class="text-red-700 hover:underline font-bold" @click="del(r.id)">Hapus</button>
