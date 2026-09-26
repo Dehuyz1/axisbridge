@@ -27,6 +27,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-axis}:${POSTGRES_PASSWORD:-axispass}@postgres:5432/${POSTGRES_DB:-axisbridge}?sslmode=disable
       CORE_ADDR: ":1213"
+      OVO_MASTER_KEY: ${OVO_MASTER_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:${CORE_PORT:-5001}:1213"

@@ -61,6 +61,8 @@ func main() {
 			serveFile(w, r, sub, "management.html")
 		case "/gifts":
 			serveFile(w, r, sub, "gifts.html")
+		case "/ovo":
+			serveFile(w, r, sub, "ovo.html")
 		case "/setting":
 			serveFile(w, r, sub, "setting.html")
 		default:

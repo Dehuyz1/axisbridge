@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<title>axisbridge — OVO</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+<style>
+  html, body { height: 100%; }
+  body { font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
+  table.ovo-table td, table.ovo-table th { font-weight: 700; }
+  .cell { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+  .table-scroll { max-height: calc(100vh - 260px); overflow: auto; }
+  input, textarea, select { font-weight: 600; }
+  /* Status memakai titik warna saja, sama seperti Management: hijau = siap
+     bayar, kuning = menunggu OTP, merah = butuh login ulang. */
+  .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 9999px; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-900" x-data="ovo()" x-init="init()">
+
+<header class="bg-slate-800 text-slate-100 px-4 py-2 flex items-center gap-4">
+  <div class="font-extrabold text-lg">axisbridge</div>
+  <nav class="flex gap-3 text-sm font-bold">
+    <a href="/management" class="px-2 py-1 rounded hover:bg-slate-700">Management</a>
+    <a href="/gifts"      class="px-2 py-1 rounded hover:bg-slate-700">Gift List</a>
+    <a href="/ovo"        class="px-2 py-1 rounded bg-slate-700">OVO</a>
+    <a href="/setting"    class="px-2 py-1 rounded hover:bg-slate-700">Setting</a>
+  </nav>
+  <div class="ml-auto text-xs opacity-80 font-bold">
+    Wallet: <span x-text="rows.length"></span> ·
+    Saldo total: <span x-text="fmtRp(totalBalance())"></span> ·
+    Siap bayar: <span x-text="activeCount()"></span>
+  </div>
+</header>
+
+<section class="p-3 bg-white border-b">
+  <div class="text-sm font-bold mb-2">Tambah wallet</div>
+  <form class="flex flex-wrap gap-2 items-center" @submit.prevent="create()">
+    <input type="text" placeholder="Nomor OVO (08xx / 62xx)" required
+           class="border rounded px-2 py-1 text-sm w-56" x-model="form.msisdn" />
+    <input type="password" placeholder="PIN (6 digit)" required inputmode="numeric"
+           class="border rounded px-2 py-1 text-sm w-32" x-model="form.pin" />
+    <input type="text" placeholder="Nama (opsional, dipakai saat register)"
+           class="border rounded px-2 py-1 text-sm w-64" x-model="form.name" />
+    <button class="bg-slate-800 text-white rounded px-3 py-1 text-sm font-bold"
+            :disabled="busy">Simpan</button>
+    <span class="text-xs text-slate-500">
+      PIN disimpan terenkripsi AES-256-GCM. Login dilakukan terpisah lewat tombol OTP.
+    </span>
+  </form>
+  <div class="text-xs mt-2 font-bold" :class="msgOK ? 'text-emerald-700' : 'text-red-700'"
+       x-show="msg" x-text="msg"></div>
+</section>
+
+<section class="p-3">
+  <div class="bg-white rounded shadow-sm table-scroll">
+    <table class="ovo-table min-w-full text-sm">
+      <thead class="bg-slate-200 sticky top-0">
+        <tr>
+          <th class="cell w-8"></th>
+          <th class="cell text-left">Nomor</th>
+          <th class="cell text-left">Nama</th>
+          <th class="cell text-right">Saldo</th>
+          <th class="cell text-xs">Saldo diambil</th>
+          <th class="cell text-left">Token</th>
+          <th class="cell text-left">Keterangan</th>
+          <th class="cell w-72">Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="r in rows" :key="r.id">
+          <tr>
+            <td class="cell text-center">
+              <span class="status-dot" :class="dotClass(r)" :title="r.state"></span>
+            </td>
+            <td class="cell font-mono text-xs" x-text="r.msisdn"></td>
+            <td class="cell" x-text="r.name || '-'"></td>
+            <td class="cell text-right" x-text="fmtRp(r.balance)"></td>
+            <td class="cell text-xs" x-text="fmtTime(r.balance_at)"></td>
+            <td class="cell text-xs" x-text="r.has_token ? 'tersimpan' : '-'"></td>
+            <td class="cell text-xs max-w-xs truncate"
+                :title="r.last_error || ''"
+                x-text="r.last_error || (r.state === 'active' ? 'siap bayar' : stateLabel(r.state))"></td>
+            <td class="cell">
+              <div class="flex gap-1 flex-wrap">
+                <button class="text-xs border rounded px-2 py-0.5 font-bold"
+                        @click="requestOTP(r, 'whatsapp')" :disabled="busy">OTP WA</button>
+                <button class="text-xs border rounded px-2 py-0.5 font-bold"
+                        @click="requestOTP(r, 'sms')" :disabled="busy">OTP SMS</button>
+                <button class="text-xs border rounded px-2 py-0.5 font-bold"
+                        @click="refreshBalance(r)" :disabled="busy">Saldo</button>
+                <button class="text-xs text-red-700 underline font-bold"
+                        @click="del(r)" :disabled="busy">Hapus</button>
+              </div>
+              <!-- Kolom kode hanya muncul setelah OTP dikirim, supaya jelas
+                   wallet mana yang sedang menunggu input. -->
+              <div class="flex gap-1 mt-1" x-show="r.state === 'otp_sent'">
+                <input type="text" inputmode="numeric" placeholder="Kode OTP"
+                       class="border rounded px-2 py-0.5 text-xs w-28"
+                       x-model="codes[r.id]" @keydown.enter="verify(r)" />
+                <button class="text-xs bg-slate-800 text-white rounded px-2 py-0.5 font-bold"
+                        @click="verify(r)" :disabled="busy">Verifikasi</button>
+                <span class="text-xs text-slate-500 self-center"
+                      x-text="r.otp_auth_type === 'REGISTER' ? 'akan register baru' : 'login'"></span>
+              </div>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="!rows.length">
+          <td colspan="8" class="cell text-center text-slate-500 py-8 font-bold">
+            Belum ada wallet OVO.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+function ovo() {
+  return {
+    rows: [], codes: {}, busy: false, msg: '', msgOK: false,
+    form: { msisdn: '', pin: '', name: '' },
+
+    init() {
+      this.load();
+      // Saldo dan state berubah karena pay-worker juga, bukan hanya dari UI,
+      // jadi tabel di-refresh berkala.
+      setInterval(() => { if (!this.busy) this.load(); }, 10000);
+    },
+
+    async load() {
+      const res = await fetch('/api/ovo');
+      if (res.ok) this.rows = await res.json();
+    },
+
+    async call(url, opts, okMsg) {
+      this.busy = true;
+      try {
+        const res = await fetch(url, opts);
+        const text = await res.text();
+        if (!res.ok) { this.say(text || res.statusText, false); return null; }
+        this.say(okMsg, true);
+        return text ? JSON.parse(text) : {};
+      } catch (e) {
+        this.say(String(e), false);
+        return null;
+      } finally {
+        this.busy = false;
+        await this.load();
+      }
+    },
+
+    say(m, ok) { this.msg = m; this.msgOK = ok; setTimeout(() => this.msg = '', 6000); },
+
+    async create() {
+      const body = JSON.stringify(this.form);
+      const out = await this.call('/api/ovo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+      }, 'Wallet tersimpan. Lanjut kirim OTP untuk login.');
+      if (out) this.form = { msisdn: '', pin: '', name: '' };
+    },
+
+    async requestOTP(r, channel) {
+      const out = await this.call(`/api/ovo/${r.id}/otp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel }),
+      }, null);
+      if (out) {
+        this.say(out.auth_type === 'REGISTER'
+          ? `Kode dikirim via ${channel}. Nomor ini belum punya akun OVO, verifikasi akan register baru.`
+          : `Kode dikirim via ${channel}. Masukkan kode untuk login.`, true);
+      }
+    },
+
+    async verify(r) {
+      const code = (this.codes[r.id] || '').trim();
+      if (!code) { this.say('Kode OTP kosong', false); return; }
+      const out = await this.call(`/api/ovo/${r.id}/verify`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      }, null);
+      if (out) {
+        this.codes[r.id] = '';
+        this.say(out.registered ? 'Akun OVO dibuat dan login berhasil.' : 'Login berhasil.', true);
+      }
+    },
+
+    async refreshBalance(r) {
+      await this.call(`/api/ovo/${r.id}/balance`, { method: 'POST' }, 'Saldo diperbarui.');
+    },
+
+    async del(r) {
+      if (!confirm(`Hapus wallet ${r.msisdn}?`)) return;
+      await this.call(`/api/ovo/${r.id}`, { method: 'DELETE' }, 'Wallet dihapus.');
+    },
+
+    dotClass(r) {
+      if (!r.enabled) return 'bg-slate-400';
+      switch (r.state) {
+        case 'active':       return 'bg-emerald-500';
+        case 'otp_sent':     return 'bg-amber-400';
+        case 'login_needed': return 'bg-red-500';
+        case 'disabled':     return 'bg-slate-400';
+        default:             return 'bg-slate-300';
+      }
+    },
+
+    stateLabel(s) {
+      return { new: 'belum login', otp_sent: 'menunggu kode OTP',
+               login_needed: 'butuh login ulang', disabled: 'dimatikan' }[s] || s;
+    },
+
+    totalBalance() { return this.rows.reduce((a, r) => a + (r.balance || 0), 0); },
+    activeCount() { return this.rows.filter(r => r.state === 'active' && r.enabled).length; },
+
+    fmtRp(n) {
+      if (n === null || n === undefined) return '-';
+      return 'Rp ' + Number(n).toLocaleString('id-ID');
+    },
+    fmtTime(t) {
+      if (!t) return '-';
+      return new Date(t).toLocaleString('id-ID', { hour12: false });
+    },
+  };
+}
+</script>
+</body>
+</html>

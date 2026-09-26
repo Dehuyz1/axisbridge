@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"axisbridge/internal/axis"
+	"axisbridge/internal/ovo"
 	"axisbridge/internal/settings"
 )
 
@@ -31,6 +32,10 @@ type Server struct {
 	Pool     *pgxpool.Pool
 	Settings *settings.Store
 	Logger   *slog.Logger
+	// Vault encrypts OVO PINs and cached tokens at rest. Nil when
+	// OVO_MASTER_KEY is unset: OVO endpoints then refuse rather than storing
+	// secrets in the clear.
+	Vault *ovo.PinCipher
 }
 
 // Routes attaches every handler to mux.
@@ -57,6 +62,13 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings/{key}", s.putSetting)
 
 	mux.HandleFunc("GET /api/stats", s.stats)
+
+	mux.HandleFunc("GET /api/ovo", s.listOVO)
+	mux.HandleFunc("POST /api/ovo", s.createOVO)
+	mux.HandleFunc("POST /api/ovo/{id}/otp", s.ovoRequestOTP)
+	mux.HandleFunc("POST /api/ovo/{id}/verify", s.ovoVerifyOTP)
+	mux.HandleFunc("POST /api/ovo/{id}/balance", s.ovoBalance)
+	mux.HandleFunc("DELETE /api/ovo/{id}", s.deleteOVO)
 }
 
 // -- health ------------------------------------------------------------------

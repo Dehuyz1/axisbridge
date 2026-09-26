@@ -19,6 +19,7 @@ import (
 
 	"axisbridge/internal/api"
 	"axisbridge/internal/db"
+	"axisbridge/internal/ovo"
 	"axisbridge/internal/renew"
 	"axisbridge/internal/settings"
 )
@@ -60,7 +61,21 @@ func main() {
 	scanner := &renew.Scanner{Pool: pool, Settings: store, Logger: logger}
 	go scanner.Run(ctx)
 
-	srv := &api.Server{Pool: pool, Settings: store, Logger: logger}
+	// OVO_MASTER_KEY is optional: without it the process still serves AXIS
+	// fully, and the OVO endpoints refuse rather than persisting PINs in the
+	// clear.
+	var vault *ovo.PinCipher
+	if key := os.Getenv("OVO_MASTER_KEY"); key != "" {
+		vault, err = ovo.NewPinCipher([]byte(key))
+		if err != nil {
+			logger.Error("ovo master key", "err", err)
+			os.Exit(1)
+		}
+	} else {
+		logger.Warn("OVO_MASTER_KEY unset; OVO endpoints disabled")
+	}
+
+	srv := &api.Server{Pool: pool, Settings: store, Logger: logger, Vault: vault}
 	mux := http.NewServeMux()
 	srv.Routes(mux)
 
