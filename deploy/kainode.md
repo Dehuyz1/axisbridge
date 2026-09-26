@@ -39,7 +39,6 @@ Wajib set di `.env`:
 
 ```
 POSTGRES_PASSWORD=<random 32 char>
-OVO_MASTER_KEY=<hex 64 char>   # openssl rand -hex 32
 UI_BIND=127.0.0.1              # kalau pakai Caddy
 CADDY_DOMAIN=axis.example.com  # kalau pakai Caddy
 CADDY_EMAIL=you@example.com
@@ -51,7 +50,6 @@ dan gunakan Caddy/Nginx kalau UI diekspos ke internet.
 Generate secret cepat:
 
 ```bash
-openssl rand -hex 32   # untuk OVO_MASTER_KEY
 openssl rand -base64 24 # untuk POSTGRES_PASSWORD
 ```
 
@@ -119,3 +117,60 @@ Cron harian:
   sesuai jumlah nomor + events. Bersihkan tabel `events` bulanan lewat
   cron kalau perlu.
 - **RAM 1GB**: kecilkan `AXIS_WORKER_CONCURRENCY=2` dan `OVO_WORKER_CONCURRENCY=1`.
+
+## Mode C: systemd native (Kainode production saat ini)
+
+Di Kainode, binary Go berjalan langsung sebagai systemd unit — bukan
+container. Postgres satu-satunya yang jalan sebagai container
+(`axisbridge-pg` di `127.0.0.1:5000`). Layout:
+
+- Source + binary: `/opt/axisbridge/`
+- Binary: `/opt/axisbridge/bin/{axis-core,register-worker,gift-worker,axis-ui}`
+- Env: `/opt/axisbridge/.env` dibaca via `EnvironmentFile=` di setiap unit
+- Units: `axis-core`, `axis-register-worker`, `axis-gift-worker`, `axis-ui`
+
+**Go di VPS ini 1.22; toolchain download diblokir — jangan naikkan `go` directive
+di `go.mod` melebihi 1.22.**
+
+### Deploy / update
+
+```bash
+ssh kainode "bash -lc '
+  cd /opt/axisbridge && git pull
+  GOPROXY=https://proxy.golang.org,direct go build -trimpath -ldflags=\"-s -w\" \
+    -o bin/axis-core ./cmd/axis-core
+  systemctl restart axis-core
+'"
+```
+
+Rebuild satu binary (contoh `axis-ui`):
+
+```bash
+ssh kainode "bash -lc 'cd /opt/axisbridge && \
+  GOPROXY=https://proxy.golang.org,direct go build -trimpath -ldflags=\"-s -w\" \
+  -o bin/axis-ui ./cmd/axis-ui && systemctl restart axis-ui'"
+```
+
+Restart semua sekaligus:
+
+```bash
+ssh kainode "bash -lc 'systemctl restart axis-core axis-register-worker axis-gift-worker axis-ui'"
+```
+
+### Cek status
+
+```bash
+ssh kainode "bash -lc 'systemctl is-active axis-core axis-register-worker axis-gift-worker axis-ui'"
+ssh kainode "bash -lc 'curl -sS http://127.0.0.1:5001/healthz'"
+ssh kainode "bash -lc 'curl -sS http://127.0.0.1:5002/api/stats'"
+```
+
+### Postgres container
+
+```bash
+# status
+ssh kainode "bash -lc 'docker ps --filter name=axisbridge-pg'"
+# backup manual
+ssh kainode "bash -lc 'docker exec axisbridge-pg pg_dump -U axis axisbridge \
+  | gzip > /opt/backups/axisbridge-\$(date +%F).sql.gz'"
+```

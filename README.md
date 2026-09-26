@@ -1,13 +1,13 @@
 # axisbridge (split)
 
 Split rewrite of the monolithic `axisbridgev2`. Postgres-backed queue
-(`LISTEN/NOTIFY` + `SKIP LOCKED`), 4 independent Go binaries, 2 dashboards.
+(`LISTEN/NOTIFY` + `SKIP LOCKED`), 4 independent Go binaries, 3 dashboards.
 
 ```
 ┌───────────────────────┐         LISTEN/NOTIFY
 │ PostgreSQL 16         │◀────────────────────────┐
 │ accounts, jobs,       │                         │
-│ settings, ovo_accounts│                         │
+│ settings              │                         │
 └─────┬─────────────────┘                         │
       │ SQL                                       │
       ▼                                           │
@@ -19,17 +19,17 @@ Split rewrite of the monolithic `axisbridgev2`. Postgres-backed queue
       │ INSERT jobs                               │
       │                                           │
       ▼                                           │
-┌──────────────┐    ┌───────────────┐             │
-│ axis-worker  │    │  ovo-payer    │─────────────┘
-│ AXIS client  │    │  OVO client   │
-└──────────────┘    └───────────────┘
+┌─────────────────┐    ┌──────────────┐           │
+│ register-worker │    │ gift-worker  │───────────┘
+│ axis_otp_request│    │ axis_gift    │
+└─────────────────┘    └──────────────┘
 ```
 
 ## Bring up (local dev)
 
 ```bash
 cp .env.example .env
-# set OVO_MASTER_KEY in .env
+# set POSTGRES_PASSWORD in .env
 docker compose up -d --build
 # UI      http://localhost:5002     (no auth — front with reverse proxy if public)
 # core    http://localhost:5001/healthz
@@ -73,29 +73,38 @@ internal/
 
 Two layers:
 
-- **Bootstrap** (`.env`): `DATABASE_URL`, ports, `OVO_MASTER_KEY`. Wajib ada
+- **Bootstrap** (`.env`): `DATABASE_URL`, ports, `POSTGRES_PASSWORD`. Wajib ada
   sebelum Postgres reachable.
 - **Runtime** (`settings` table, editable dari `/setting` UI):
   `otp.max_attempt`, `otp.retry_gap`, `otp.debounce`, `gift.quota_daily`,
-  `worker.register_enabled`, `worker.gift_enabled`, `log.level`.
+  `worker.register_enabled`, `worker.gift_enabled`, `renew.enabled`,
+  `renew.minus_days`, `log.level`.
   Worker polling settings tiap 10s — perubahan langsung apply tanpa
   restart binary.
 
 ## Dashboards
 
-- `/management` — daftar semua nomor. Kolom: ID, Nomor, Status, OTP
-  Attempts, Last OTP, Last Login. Aksi: register, resend OTP, pause,
-  delete. Footer live: counter per status + total gift.
-- `/gifts` — **cuma** 2 kolom fungsional: Nomor + Bukti Transaksi Sukses.
-  Setiap baris = satu gift sukses yang di-insert oleh `gift-worker`.
-- `/setting` — form group (OTP / Gift / Worker), inline save ke Postgres.
+- `/management` — daftar nomor (bukan `gift_only`). Kolom: Status · Nomor ·
+  Masa Aktif · Paket — semua sortable + filterable. Status tampil sebagai
+  `MATI` / `TIDAK MATI` dari boolean `dead`. Double-click badge status →
+  dialog token (`axis_token` + `axis_refresh`). Aksi: register, resend OTP,
+  pause, resume, delete, Upload List, Export CSV.
+- `/gifts` — daftar gift sukses dari `gift-worker`. 8 kolom: Nomor, Paket,
+  Nominal, Trx ID, OVO Nomor, OVO Trx, OVO Bayar, Waktu — plus checkbox +
+  kolom Aksi. Delete per baris, delete terpilih, delete semua (confirm).
+  Upload dari halaman ini **skip OTP**: nomor langsung `gift_only=true`,
+  `status=gift_wait`, enqueue `axis_gift`. Nomor `gift_only` tidak muncul
+  di `/management`.
+- `/setting` — form group OTP / Gift / Worker / Renew, inline save ke Postgres.
 
 ## Register + gift flow
+
+**Jalur A — register via `/management`:**
 
 1. User register nomor di `/management`.
 2. `axis-core` insert `accounts` (status=`otp_pending`) + `jobs` kind
    `axis_otp_request` (attempt=1).
-3. `register-worker` klaim job → panggil AXIS RequestOTP (stub sekarang),
+3. `register-worker` klaim job → panggil AXIS RequestOTP (stub),
    naikkan `otp_attempts`, dan:
    - kalau `otp_attempts < otp.max_attempt` → enqueue attempt berikutnya
      dengan `scheduled_at = NOW() + otp.retry_gap`.
@@ -104,9 +113,44 @@ Two layers:
 4. `gift-worker` klaim job `axis_gift` → panggil AXIS gift (stub) →
    insert `gifts(msisdn, proof)` + set `status=gift_done`.
 
+**Jalur B — upload langsung via `/gifts` (skip OTP):**
+
+1. User upload list nomor dari halaman `/gifts` (`POST /api/gifts/bulk`).
+2. `axis-core` insert/reuse `accounts` dengan `gift_only=true`,
+   `status=gift_wait`, langsung enqueue `axis_gift`. OTP loop tidak
+   disentuh sama sekali.
+3. `gift-worker` memproses sama seperti langkah 4 di atas.
+
 SMS balasan (OTP asli) yang bisa mengubah status jadi `available` datang
 lewat endpoint `POST /api/provider/sms` yang akan ditambahkan ketika
 client AXIS asli benar-benar di-port.
+
+## REST endpoints
+
+```
+GET  /healthz
+
+GET  /api/accounts                   list accounts (sort/filter via query)
+POST /api/register                   register satu nomor
+POST /api/accounts/bulk              register banyak nomor
+GET  /api/accounts/{id}/token        reveal axis_token + axis_refresh
+POST /api/accounts/{id}/resend       paksa ulang OTP loop
+POST /api/accounts/{id}/pause        set status=paused
+POST /api/accounts/{id}/resume       set status=new
+DELETE /api/accounts/{id}            hapus account
+GET  /api/accounts.csv               export CSV seluruh kolom
+
+GET  /api/gifts                      list gift sukses
+POST /api/gifts/bulk                 upload nomor skip-OTP (gift_only)
+DELETE /api/gifts/{id}               hapus satu gift
+POST /api/gifts/delete_all           hapus semua gift (body: {"confirm":true})
+GET  /api/gifts.csv                  export CSV gifts
+
+GET  /api/settings                   baca semua runtime settings
+PUT  /api/settings/{key}             update satu setting
+
+GET  /api/stats                      ringkasan: accounts, gifts, jobs
+```
 
 ## Job queue mechanics
 

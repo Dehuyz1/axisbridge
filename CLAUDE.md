@@ -6,7 +6,7 @@ truth.
 ## Fast facts
 
 - Repo: split rewrite of `axisbridgev2`. Go + Postgres.
-- 4 binaries: `cmd/axis-core`, `cmd/axis-worker`, `cmd/ovo-payer`,
+- 4 binaries: `cmd/axis-core`, `cmd/register-worker`, `cmd/gift-worker`,
   `cmd/axis-ui`.
 - Shared code under `internal/`.
 - UI is 3 pages: `/management`, `/gifts`, `/setting`. No built-in auth —
