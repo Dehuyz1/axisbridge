@@ -142,7 +142,7 @@ function ovo() {
         const res = await fetch(url, opts);
         const text = await res.text();
         if (!res.ok) { this.say(text || res.statusText, false); return null; }
-        this.say(okMsg, true);
+        if (okMsg) this.say(okMsg, true);
         return text ? JSON.parse(text) : {};
       } catch (e) {
         this.say(String(e), false);
@@ -153,7 +153,9 @@ function ovo() {
       }
     },
 
-    say(m, ok) { this.msg = m; this.msgOK = ok; setTimeout(() => this.msg = '', 6000); },
+    // Callers pass null when the message depends on the response body and is
+    // set by the caller afterwards; that must not blank the banner.
+    say(m, ok) { if (!m) return; this.msg = m; this.msgOK = ok; setTimeout(() => this.msg = '', 6000); },
 
     async create() {
       const body = JSON.stringify(this.form);
