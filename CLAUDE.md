@@ -9,15 +9,17 @@ truth.
 - 4 binaries: `cmd/axis-core`, `cmd/register-worker`, `cmd/gift-worker`,
   `cmd/axis-ui`.
 - Shared code under `internal/`.
-- UI is 3 pages: `/management`, `/gifts`, `/setting`. No built-in auth —
-  protect with a reverse proxy if exposed publicly.
+- UI is 4 pages: `/management`, `/gifts`, `/ovo`, `/setting`. No built-in
+  auth — protect with a reverse proxy if exposed publicly.
 - Job queue is Postgres — LISTEN/NOTIFY + `FOR UPDATE SKIP LOCKED`.
 - Runtime config in `settings` table, editable from `/setting`.
 
 ## Do not
 
 - Edit `0001_init.sql` after it has been applied. Add a new migration.
-- Store OVO PIN plaintext.
+- Store OVO PIN or access token plaintext. Both go through
+  `ovo.PinCipher` (AES-256-GCM, key `OVO_MASTER_KEY`) and must never be
+  selected into an API response.
 - Import `internal/*` from outside the module.
 - Add SQLite or any second DB.
 

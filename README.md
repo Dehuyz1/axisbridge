@@ -1,7 +1,7 @@
 # axisbridge (split)
 
 Split rewrite of the monolithic `axisbridgev2`. Postgres-backed queue
-(`LISTEN/NOTIFY` + `SKIP LOCKED`), 4 independent Go binaries, 3 dashboards.
+(`LISTEN/NOTIFY` + `SKIP LOCKED`), 4 independent Go binaries, 4 dashboards.
 
 ```
 ┌───────────────────────┐         LISTEN/NOTIFY
@@ -60,21 +60,23 @@ cmd/
   axis-core/         REST API + migration owner
   register-worker/   consume axis_otp_request; loop 3x, lalu → gift_wait
   gift-worker/       consume axis_gift; sukses → row baru di tabel gifts
-  axis-ui/           3 dashboard (Management / Gift List / Setting)
+  axis-ui/           4 dashboard (Management / Gift List / OVO / Setting)
 internal/
   db/                pgx pool + embedded goose migrations
   jobq/              LISTEN/NOTIFY + SKIP LOCKED job runner
   settings/          live-reload settings snapshot
   api/               REST handlers untuk axis-core
   axis/              phone normalizer (client AXIS asli belum di-port)
+  ovo/               OVO client: OTP login/register, saldo, PIN vault
+  renew/             scanner yang enqueue axis_renew untuk nomor lewat masa
 ```
 
 ## Config
 
 Two layers:
 
-- **Bootstrap** (`.env`): `DATABASE_URL`, ports, `POSTGRES_PASSWORD`. Wajib ada
-  sebelum Postgres reachable.
+- **Bootstrap** (`.env`): `DATABASE_URL`, ports, `POSTGRES_PASSWORD`,
+  `OVO_MASTER_KEY`. Wajib ada sebelum Postgres reachable.
 - **Runtime** (`settings` table, editable dari `/setting` UI):
   `otp.max_attempt`, `otp.retry_gap`, `otp.debounce`, `gift.quota_daily`,
   `worker.register_enabled`, `worker.gift_enabled`, `renew.enabled`,
@@ -95,6 +97,13 @@ Two layers:
   Upload dari halaman ini **skip OTP**: nomor langsung `gift_only=true`,
   `status=gift_wait`, enqueue `axis_gift`. Nomor `gift_only` tidak muncul
   di `/management`.
+- `/ovo` — wallet OVO untuk membayar renew & gift. Kolom: status (titik
+  warna) · Nomor · Nama · Saldo · Saldo diambil · Token · Keterangan · Aksi.
+  Tambah wallet menyimpan PIN terenkripsi; login terpisah lewat OTP WA / SMS,
+  lalu kode diverifikasi di baris yang sama. OVO sendiri yang menentukan
+  nomor itu login atau perlu register, dan UI menampilkan keputusan itu.
+  Titik: hijau `active` (siap bayar), kuning `otp_sent`, merah
+  `login_needed`, abu `new`/`disabled`.
 - `/setting` — form group OTP / Gift / Worker / Renew, inline save ke Postgres.
 
 ## Register + gift flow
@@ -161,6 +170,18 @@ GET  /api/stats                      ringkasan: accounts, gifts, jobs
 - Klaim: `SELECT … FOR UPDATE SKIP LOCKED LIMIT 1` — aman multi-replica.
 - Panic-safe: handler yang panic dianggap fail.
 
+## Renew pipeline
+
+- `internal/renew` scanner jalan di dalam `axis-core` (bukan binary sendiri:
+  kerjanya hanya `INSERT … SELECT` ke DB yang sudah dimiliki axis-core).
+- Tiap tick (`renew.scan_every`, minimum 1m) ia cari nomor yang masa aktifnya
+  sudah lewat `renew.minus_days` hari, lalu enqueue satu `axis_renew`.
+- Dikecualikan: `dead`, `gift_only`, `paused`, dan nomor yang baru di-charge
+  dalam `renew.cooldown`.
+- Unique index `idx_jobs_active_per_account` menjamin satu nomor tidak pernah
+  punya dua `axis_renew` aktif, jadi tick berulang aman (idempoten).
+- `renew.enabled=false` mematikan enqueue sepenuhnya.
+
 ## Next milestones
 
 1. Port AXIS client asli (`axisbridgev2/axis`) → `internal/axis` +
@@ -168,5 +189,5 @@ GET  /api/stats                      ringkasan: accounts, gifts, jobs
    flow).
 2. Tambah endpoint `POST /api/provider/numbers` + `POST /api/provider/sms`
    di `internal/api` supaya ModemGo bisa push nomor & OTP.
-3. Feature terpisah OVO/renewal (belum dipasang lagi; keluar dari scope
-   sekarang biar bug OVO tidak nyangkut ke register/gift).
+3. `pay-worker`: konsumsi `axis_renew` → charge AXIS → `ScanQR` → `PayNotif`
+   pakai wallet dari `/ovo`, tulis hasilnya ke tabel `transactions`.

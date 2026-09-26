@@ -6,9 +6,10 @@
   now decoupled into isolated services so one bug does not stop the world.
 - **Stack**: Go 1.22, PostgreSQL 16, embedded goose migrations, plain HTML +
   Alpine.js + Tailwind CDN for the UI.
-- **Runtime**: 4 binaries. `axis-core` owns Postgres + REST; `register-worker`
-  consumes `axis_otp_request` jobs; `gift-worker` consumes `axis_gift` jobs;
-  `axis-ui` serves the 3 dashboards and reverse-proxies `/api/*` to core.
+- **Runtime**: 4 binaries. `axis-core` owns Postgres + REST + the renew
+  scanner; `register-worker` consumes `axis_otp_request` jobs; `gift-worker`
+  consumes `axis_gift` jobs; `axis-ui` serves the 4 dashboards and
+  reverse-proxies `/api/*` to core.
 - **Package manager**: `go mod` (`go.mod` at repo root).
 
 ## Commands
@@ -48,6 +49,10 @@ docker compose logs -f axis-core
 **NEVER touch**:
 
 - `.env` (real secrets)
+- `OVO_MASTER_KEY` values in commits or logs — losing it orphans every
+  stored wallet
+- OVO PIN and access token plaintext — always `ovo.PinCipher` ciphertext in
+  `pin_enc` / `token_enc`, and never selected into an API response
 - `pgdata/` volume
 - Production Postgres data unless explicitly asked
 
@@ -55,13 +60,14 @@ docker compose logs -f axis-core
 
 - `github.com/jackc/pgx/v5` — Postgres driver + pool + LISTEN/NOTIFY
 - `github.com/pressly/goose/v3` — embedded SQL migrations
+- stdlib `crypto/aes` + `crypto/cipher` — AES-256-GCM vault for OVO secrets
 
 ## Configuration
 
 Bootstrap env (see `.env.example`):
 
 ```
-DATABASE_URL, CORE_ADDR, UI_ADDR, CORE_URL,
+DATABASE_URL, CORE_ADDR, UI_ADDR, CORE_URL, OVO_MASTER_KEY,
 REGISTER_CONCURRENCY, GIFT_CONCURRENCY, LOG_LEVEL
 ```
 
@@ -86,3 +92,17 @@ Defaults inserted by `0001_init.sql`.
   deploy) or `journalctl -u axis-core -n 50 --no-pager` (systemd/Kainode).
 - **`ERROR: cannot change name of input parameter` on migrate**: schema
   changed — bump migration file, do not edit `0001_init.sql` in place.
+- **`/ovo` returns `412 OVO_MASTER_KEY not configured`**: the key is missing
+  from the environment `axis-core` actually reads. On Kainode that is
+  `/opt/axisbridge/.env`; generate with `openssl rand -hex 32`, then
+  `systemctl restart axis-core`.
+- **OVO `[OV00006]` on verify**: wrong or expired OTP code. The wallet stays
+  in `otp_sent`, so request a new code and retry.
+- **OVO `[OV00612]` on login**: OVO reported an existing account that turns
+  out not to exist. `ovoVerifyOTP` already falls back to `Register`, so this
+  only surfaces if registration itself also fails.
+- **Wallet stuck in `login_needed`**: the cached token was rejected. Send a
+  fresh OTP; the PIN on file is reused, no re-entry needed.
+- **Renew scanner enqueues nothing**: check `renew.enabled` is `true` and
+  `renew.minus_days` is negative. A number is also skipped when it is
+  `dead`, `gift_only`, `paused`, or was charged within `renew.cooldown`.
