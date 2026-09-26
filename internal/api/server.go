@@ -48,6 +48,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/accounts.csv", s.exportAccountsCSV)
 
 	mux.HandleFunc("GET /api/gifts", s.listGifts)
+	mux.HandleFunc("POST /api/gifts/bulk", s.bulkGift)
+	mux.HandleFunc("DELETE /api/gifts/{id}", s.deleteGift)
+	mux.HandleFunc("POST /api/gifts/delete_all", s.deleteAllGifts)
 	mux.HandleFunc("GET /api/gifts.csv", s.exportGiftsCSV)
 
 	mux.HandleFunc("GET /api/settings", s.getSettings)
@@ -127,7 +130,9 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	args := []any{limit, offset}
-	where := "TRUE"
+	// Management page hanya melihat nomor register-flow. Nomor gift_only
+	// (upload via Gift page) sengaja disembunyikan supaya list tetap bersih.
+	where := "gift_only = FALSE"
 	if statusEnum != "" {
 		args = append(args, statusEnum)
 		where += fmt.Sprintf(" AND status = $%d::account_status", len(args))
@@ -518,6 +523,141 @@ func (s *Server) listGifts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, g)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// bulkGift menerima list nomor (JSON array atau text/plain) dan langsung
+// mengirimnya ke antrian gift-worker TANPA melalui OTP loop. Nomor ditandai
+// `gift_only=true` supaya tidak muncul di dashboard Management.
+//
+// Cocok untuk skenario: user sudah punya nomor yang siap dikasih gift dan
+// tidak butuh proses register/OTP (misal nomor dari batch external).
+func (s *Server) bulkGift(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+	if err != nil {
+		http.Error(w, "read body", http.StatusBadRequest)
+		return
+	}
+	var inputs []string
+	ct := r.Header.Get("Content-Type")
+	if strings.Contains(ct, "application/json") {
+		var arr []string
+		if json.Unmarshal(body, &arr) == nil && len(arr) > 0 {
+			inputs = arr
+		} else {
+			var obj struct {
+				Numbers []string `json:"numbers"`
+			}
+			if err := json.Unmarshal(body, &obj); err != nil {
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
+			inputs = obj.Numbers
+		}
+	} else {
+		for _, tok := range strings.FieldsFunc(string(body), func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\r' || r == '\t'
+		}) {
+			if tok != "" {
+				inputs = append(inputs, tok)
+			}
+		}
+	}
+
+	results := make([]bulkResult, 0, len(inputs))
+	for _, raw := range inputs {
+		item := bulkResult{Input: raw}
+		resp, err := s.enqueueGiftOnly(r.Context(), raw)
+		if err != nil {
+			item.Error = err.Error()
+		} else {
+			item.MSISDN = resp.MSISDN
+			item.Status = resp.Status
+			item.ID = resp.ID
+			item.Reused = resp.Reused
+			item.Enqueued = resp.Enqueued
+		}
+		results = append(results, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total":   len(results),
+		"results": results,
+	})
+}
+
+// enqueueGiftOnly: insert/reuse account dengan flag gift_only=true dan langsung
+// enqueue job axis_gift. Tidak menyentuh OTP fields.
+func (s *Server) enqueueGiftOnly(ctx context.Context, raw string) (registerResp, error) {
+	msisdn := axis.NormalizePhone(raw)
+	if msisdn == "" {
+		return registerResp{}, errInvalid("msisdn required")
+	}
+	if !axis.IsAxis(msisdn) {
+		return registerResp{}, errInvalid("not an AXIS number")
+	}
+
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return registerResp{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		id     int64
+		reused bool
+	)
+	err = tx.QueryRow(ctx, `
+        INSERT INTO accounts(msisdn, status, gift_only)
+        VALUES($1, 'gift_wait', TRUE)
+        ON CONFLICT (msisdn) DO UPDATE
+           SET status    = 'gift_wait',
+               gift_only = TRUE
+        RETURNING id, (xmax <> 0) AS reused
+    `, msisdn).Scan(&id, &reused)
+	if err != nil {
+		return registerResp{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+        INSERT INTO jobs(kind, account_id, payload, max_attempts)
+        VALUES('axis_gift'::job_kind, $1, jsonb_build_object('gift_only', true), 3)
+    `, id); err != nil {
+		return registerResp{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return registerResp{}, err
+	}
+	return registerResp{ID: id, MSISDN: msisdn, Status: "gift_wait", Reused: reused, Enqueued: true}, nil
+}
+
+// deleteGift menghapus satu row gift. Account tidak ikut dihapus supaya
+// audit trail tetap ada; kalau user mau hapus account, pakai
+// DELETE /api/accounts/{id}.
+func (s *Server) deleteGift(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := s.Pool.Exec(r.Context(), `DELETE FROM gifts WHERE id=$1`, id); err != nil {
+		s.serverError(w, "delete gift", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteAllGifts: nuke seluruh tabel gifts (butuh body {"confirm":true}).
+func (s *Server) deleteAllGifts(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Confirm bool `json:"confirm"` }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if !body.Confirm {
+		http.Error(w, "need {\"confirm\":true}", http.StatusBadRequest)
+		return
+	}
+	ct, err := s.Pool.Exec(r.Context(), `DELETE FROM gifts`)
+	if err != nil {
+		s.serverError(w, "delete all gifts", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": ct.RowsAffected()})
 }
 
 func (s *Server) exportGiftsCSV(w http.ResponseWriter, r *http.Request) {

@@ -49,6 +49,14 @@
   <button class="px-2 py-1 border rounded text-sm hover:bg-emerald-100 font-bold"
           @click="$refs.upDlg.showModal()">Upload List</button>
 
+  <div x-show="selected.length" class="flex gap-2 items-center text-sm">
+    <span class="font-bold" x-text="selected.length + ' dipilih'"></span>
+    <button class="px-2 py-1 border rounded hover:bg-red-100 text-red-700 font-bold"
+            @click="bulkDelete()">Hapus terpilih</button>
+  </div>
+  <button class="px-2 py-1 border rounded text-sm hover:bg-red-100 text-red-700 font-bold"
+          @click="deleteAll()">Hapus semua</button>
+
   <div class="ml-auto text-xs text-slate-500 font-bold">
     Setiap baris = 1 transaksi gift sukses.
   </div>
@@ -58,6 +66,7 @@
   <table class="gifts-table min-w-full text-sm">
     <thead class="bg-slate-200 sticky top-0">
       <tr>
+        <th class="cell w-8"><input type="checkbox" @change="toggleAll($event)" /></th>
         <th class="cell sortable" @click="setSort('msisdn')">Nomor<span class="sort-ind" x-text="ind('msisdn')"></span></th>
         <th class="cell sortable" @click="setSort('paket')">Paket<span class="sort-ind" x-text="ind('paket')"></span></th>
         <th class="cell sortable text-right" @click="setSort('amount')">Nominal<span class="sort-ind" x-text="ind('amount')"></span></th>
@@ -66,11 +75,13 @@
         <th class="cell col-ovo sortable" @click="setSort('ovo_trx_id')">OVO Trx<span class="sort-ind" x-text="ind('ovo_trx_id')"></span></th>
         <th class="cell col-ovo sortable text-right" @click="setSort('ovo_amount')">OVO Bayar<span class="sort-ind" x-text="ind('ovo_amount')"></span></th>
         <th class="cell sortable" @click="setSort('created_at')">Waktu<span class="sort-ind" x-text="ind('created_at')"></span></th>
+        <th class="cell w-20">Aksi</th>
       </tr>
     </thead>
     <tbody>
       <template x-for="r in filteredSorted()" :key="r.id">
         <tr class="hover:bg-slate-50">
+          <td class="cell"><input type="checkbox" :value="r.id" x-model="selected" /></td>
           <td class="cell font-mono" x-text="r.msisdn"></td>
           <td class="cell" x-text="displayPaket(r) || '-'"></td>
           <td class="cell text-right" x-text="fmtRp(r.amount)"></td>
@@ -79,10 +90,13 @@
           <td class="cell font-mono text-xs col-ovo" x-text="r.ovo_trx_id || '-'"></td>
           <td class="cell text-right col-ovo" x-text="fmtRp(r.ovo_amount)"></td>
           <td class="cell text-xs" x-text="fmtTime(r.created_at)"></td>
+          <td class="cell text-xs">
+            <button class="text-red-700 hover:underline font-bold" @click="del(r.id)">Hapus</button>
+          </td>
         </tr>
       </template>
       <tr x-show="!rows.length">
-        <td colspan="8" class="cell text-center text-slate-500 py-8 font-bold">
+        <td colspan="10" class="cell text-center text-slate-500 py-8 font-bold">
           Belum ada gift sukses.
         </td>
       </tr>
@@ -93,13 +107,13 @@
 <!-- Dialog: upload list nomor untuk register -->
 <dialog x-ref="upDlg" class="w-[600px] max-w-full" style="border-radius:8px;border:1px solid #cbd5e1;padding:0">
   <div class="p-4 bg-slate-800 text-slate-100 flex items-center">
-    <div class="font-extrabold">Upload List Nomor untuk Gift</div>
+    <div class="font-extrabold">Upload List Nomor - Langsung Gift</div>
     <button class="ml-auto text-slate-300 hover:text-white" @click="$refs.upDlg.close()">✕</button>
   </div>
   <div class="p-4 space-y-3">
     <div class="text-xs text-slate-600 font-bold">
-      Nomor akan masuk flow register terlebih dulu (OTP loop).
-      Setelah OTP habis → otomatis lanjut ke gift worker.
+      Nomor <span class="text-emerald-700">langsung masuk antrian gift-worker</span> tanpa
+      request OTP. Nomor tidak akan muncul di halaman Management.
     </div>
     <textarea x-model="bulkText" class="w-full h-56 border rounded p-2 font-mono text-xs"
               placeholder="083131234567&#10;083887654321"></textarea>
@@ -107,7 +121,7 @@
       <input type="file" accept=".txt,.csv" @change="loadFile($event)" class="text-xs font-bold" />
       <button class="ml-auto px-3 py-1 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700"
               @click="submitBulk()" :disabled="bulkBusy">
-        <span x-text="bulkBusy ? 'Mengirim...' : 'Register semua'"></span>
+        <span x-text="bulkBusy ? 'Mengirim...' : 'Kirim ke gift'"></span>
       </button>
     </div>
     <div x-show="bulkResults.length" class="max-h-40 overflow-auto border rounded text-xs">
@@ -132,7 +146,8 @@
 <script>
 function gifts() {
   return {
-    rows: [], filter: "", paketFilter: "", ovoFilter: "",
+    rows: [], selected: [],
+    filter: "", paketFilter: "", ovoFilter: "",
     sortKey: "created_at", sortDir: "desc",
     lastRefresh: "-",
     bulkText: "", bulkResults: [], bulkBusy: false,
@@ -215,15 +230,43 @@ function gifts() {
       this.bulkBusy = true;
       this.bulkResults = [];
       try {
-        const res = await fetch("/api/accounts/bulk", {
+        const res = await fetch("/api/gifts/bulk", {
           method: "POST",
           headers: {"Content-Type":"text/plain"},
           body: this.bulkText,
         }).then(r => r.json());
         this.bulkResults = res.results || [];
+        this.reload();
       } finally {
         this.bulkBusy = false;
       }
+    },
+
+    toggleAll(e) {
+      this.selected = e.target.checked ? this.rows.map(r => r.id) : [];
+    },
+    async del(id) {
+      if (!confirm("Hapus baris gift ini?")) return;
+      await fetch(`/api/gifts/${id}`, {method: "DELETE"});
+      this.reload();
+    },
+    async bulkDelete() {
+      if (!confirm(`Hapus ${this.selected.length} baris gift?`)) return;
+      await Promise.all(this.selected.map(id => fetch(`/api/gifts/${id}`, {method: "DELETE"})));
+      this.selected = []; this.reload();
+    },
+    async deleteAll() {
+      if (!confirm("Hapus SEMUA gift? Aksi ini tidak bisa di-undo.")) return;
+      const res = await fetch("/api/gifts/delete_all", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({confirm: true}),
+      });
+      if (res.ok) {
+        const j = await res.json();
+        alert(`${j.deleted} baris dihapus.`);
+      }
+      this.selected = []; this.reload();
     },
   }
 }
